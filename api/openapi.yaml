@@ -1,0 +1,796 @@
+openapi: 3.0.3
+info:
+  title: forge API
+  version: 1.0.0
+  description: |
+    Traceability of AI spend per GitHub repository and issue.
+
+    Consumed by the `forge` daemon (ingest) and TUI (tasks, inbox, reports).
+    Designed to back a future SPA as well: every list is filterable, every
+    amount is returned both as exact USD micros and in the requested currency.
+
+    Authentication: Keycloak access tokens (Bearer JWT). Client role `admin`
+    of the `forge-api` client unlocks pricing and repository configuration.
+    Every authenticated member can read everything.
+
+    The GitHub App webhook endpoint (`POST /webhooks/github`) and health
+    probes (`/healthz`, `/readyz`) are served outside this contract.
+servers:
+  - url: https://forge.example.com
+security:
+  - bearerAuth: []
+tags:
+  - name: me
+  - name: usage
+  - name: inbox
+  - name: tasks
+  - name: repos
+  - name: reports
+  - name: prices
+  - name: users
+
+paths:
+  /v1/me:
+    get:
+      tags: [me]
+      operationId: getMe
+      summary: Current user
+      responses:
+        "200":
+          description: The authenticated user (created on first call).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/me/github-link:
+    put:
+      tags: [me]
+      operationId: linkGitHub
+      summary: Link the Keycloak identity with a GitHub login
+      description: |
+        The CLI sends the developer's `gh` token once. The API calls
+        `GET https://api.github.com/user` with it, checks organization
+        membership and stores the login. The token is never persisted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GitHubLinkRequest" }
+      responses:
+        "200":
+          description: Linked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      responses:
+        "200":
+          description: All known users.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/User" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/usage-events/batch:
+    post:
+      tags: [usage]
+      operationId: ingestUsageEvents
+      summary: Ingest usage events captured by a daemon (idempotent)
+      description: |
+        Events are deduplicated by `harness` + `external_id`. Re-sending an
+        event is safe and counted as duplicate. The owner is the token subject.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IngestRequest" }
+      responses:
+        "200":
+          description: Ingest result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngestResult" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/usage-events:
+    get:
+      tags: [usage]
+      operationId: listUsageEvents
+      parameters:
+        - $ref: "#/components/parameters/UserFilter"
+        - $ref: "#/components/parameters/RepoFilter"
+        - { name: issue, in: query, schema: { type: integer }, description: "Issue number (requires repo)." }
+        - { name: bucket, in: query, schema: { $ref: "#/components/schemas/Bucket" } }
+        - { name: session_id, in: query, schema: { type: string } }
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Events, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UsageEventPage" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/usage-events/reassign:
+    post:
+      tags: [usage, inbox]
+      operationId: reassignUsageEvents
+      summary: Move events to an issue, or back to the inbox
+      description: |
+        Members may reassign their own events; admins any event. Every change
+        is written to the audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReassignRequest" }
+      responses:
+        "200":
+          description: Result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReassignResult" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/usage-events/reprice:
+    post:
+      tags: [prices]
+      operationId: repriceUsageEvents
+      summary: Recompute costs with the current price book (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RepriceRequest" }
+      responses:
+        "200":
+          description: Result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CountResult" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/inbox:
+    get:
+      tags: [inbox]
+      operationId: listInbox
+      summary: Unassigned spend grouped by session, for bulk triage
+      parameters:
+        - $ref: "#/components/parameters/UserFilter"
+        - $ref: "#/components/parameters/RepoFilter"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: Groups, most recent activity first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/InboxGroup" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/tasks:
+    get:
+      tags: [tasks]
+      operationId: listTasks
+      parameters:
+        - name: assignee
+          in: query
+          description: "`me` (default), a GitHub login, or `all`."
+          schema: { type: string, default: me }
+        - name: state
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: { $ref: "#/components/schemas/TaskState" }
+        - $ref: "#/components/parameters/RepoFilter"
+      responses:
+        "200":
+          description: Tasks with accumulated cost, most recently active first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Task" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/tasks/{owner}/{repo}/{number}:
+    parameters:
+      - $ref: "#/components/parameters/Owner"
+      - $ref: "#/components/parameters/Repo"
+      - $ref: "#/components/parameters/Number"
+    get:
+      tags: [tasks]
+      operationId: getTask
+      responses:
+        "200":
+          description: Task detail with cost breakdowns.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskDetail" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/tasks/{owner}/{repo}/{number}/start:
+    parameters:
+      - $ref: "#/components/parameters/Owner"
+      - $ref: "#/components/parameters/Repo"
+      - $ref: "#/components/parameters/Number"
+    post:
+      tags: [tasks]
+      operationId: startTask
+      summary: Record the start of work and move the Project status to In Progress
+      description: |
+        Called by `forge start` after the CLI has created the branch and
+        assigned the issue with the developer's own GitHub identity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StartTaskRequest" }
+      responses:
+        "200":
+          description: Updated task.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/tasks/{owner}/{repo}/{number}/pr:
+    parameters:
+      - $ref: "#/components/parameters/Owner"
+      - $ref: "#/components/parameters/Repo"
+      - $ref: "#/components/parameters/Number"
+    post:
+      tags: [tasks]
+      operationId: recordTaskPR
+      summary: Record the pull request and move the Project status to In Review
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordPRRequest" }
+      responses:
+        "200":
+          description: Updated task.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/repos:
+    get:
+      tags: [repos]
+      operationId: listRepos
+      responses:
+        "200":
+          description: Organization repositories known to forge.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Repository" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/repos/{owner}/{repo}:
+    parameters:
+      - $ref: "#/components/parameters/Owner"
+      - $ref: "#/components/parameters/Repo"
+    get:
+      tags: [repos]
+      operationId: getRepo
+      responses:
+        "200":
+          description: Repository with its Project status mapping.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Repository" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/repos/{owner}/{repo}/status-map:
+    parameters:
+      - $ref: "#/components/parameters/Owner"
+      - $ref: "#/components/parameters/Repo"
+    put:
+      tags: [repos]
+      operationId: setStatusMap
+      summary: Override the detected Project status mapping (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StatusMapOptions" }
+      responses:
+        "200":
+          description: Updated repository.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Repository" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/reports/costs:
+    get:
+      tags: [reports]
+      operationId: getCostReport
+      parameters:
+        - name: group_by
+          in: query
+          required: true
+          schema: { $ref: "#/components/schemas/GroupBy" }
+        - name: currency
+          in: query
+          schema: { $ref: "#/components/schemas/Currency" }
+        - $ref: "#/components/parameters/UserFilter"
+        - $ref: "#/components/parameters/RepoFilter"
+        - { name: bucket, in: query, schema: { $ref: "#/components/schemas/Bucket" } }
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: Aggregated costs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CostReport" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/prices:
+    get:
+      tags: [prices]
+      operationId: listPrices
+      parameters:
+        - { name: model, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Price book (latest price per model first).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Price" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      tags: [prices]
+      operationId: createPrice
+      summary: Add a manual price override (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PriceInput" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Price" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /v1/prices/sync:
+    post:
+      tags: [prices]
+      operationId: syncPrices
+      summary: Refresh seeded prices from models.dev (admin)
+      responses:
+        "200":
+          description: Result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CountResult" }
+        default: { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Owner: { name: owner, in: path, required: true, schema: { type: string } }
+    Repo: { name: repo, in: path, required: true, schema: { type: string } }
+    Number: { name: number, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    UserFilter:
+      name: user
+      in: query
+      description: "`me`, a GitHub login, or omitted for everyone."
+      schema: { type: string }
+    RepoFilter:
+      name: repo
+      in: query
+      description: Repository as `owner/name`.
+      schema: { type: string }
+    From:
+      name: from
+      in: query
+      description: Inclusive lower bound (RFC 3339).
+      schema: { type: string, format: date-time }
+    To:
+      name: to
+      in: query
+      description: Exclusive upper bound (RFC 3339).
+      schema: { type: string, format: date-time }
+    Cursor: { name: cursor, in: query, schema: { type: string } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+
+  responses:
+    Error:
+      description: Error.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, example: not_found }
+        message: { type: string }
+
+    User:
+      type: object
+      required: [id, email, name, roles]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        name: { type: string }
+        github_login: { type: string }
+        roles:
+          type: array
+          items: { type: string, enum: [member, admin] }
+
+    GitHubLinkRequest:
+      type: object
+      required: [github_token]
+      properties:
+        github_token: { type: string, writeOnly: true }
+
+    Harness:
+      type: string
+      enum: [claude-code, opencode]
+
+    Bucket:
+      type: string
+      enum: [issue, repo, external]
+
+    AttributionSource:
+      type: string
+      enum: [branch, manual, reassigned, none]
+
+    TaskState:
+      type: string
+      enum: [todo, in_progress, in_review, done]
+
+    Currency:
+      type: string
+      enum: [USD, EUR]
+      default: USD
+
+    GroupBy:
+      type: string
+      enum: [repo, issue, user, model, harness, day]
+
+    Tokens:
+      type: object
+      required: [input, output, reasoning, cache_read, cache_write]
+      properties:
+        input: { type: integer, format: int64, minimum: 0 }
+        output: { type: integer, format: int64, minimum: 0 }
+        reasoning: { type: integer, format: int64, minimum: 0 }
+        cache_read: { type: integer, format: int64, minimum: 0 }
+        cache_write: { type: integer, format: int64, minimum: 0 }
+
+    IssueRef:
+      type: object
+      required: [repo, number]
+      properties:
+        repo: { type: string, description: "owner/name" }
+        number: { type: integer, minimum: 1 }
+
+    Attribution:
+      type: object
+      required: [bucket, source]
+      properties:
+        bucket: { $ref: "#/components/schemas/Bucket" }
+        source: { $ref: "#/components/schemas/AttributionSource" }
+        repo: { type: string, description: "owner/name" }
+        branch: { type: string }
+        issue: { $ref: "#/components/schemas/IssueRef" }
+
+    UsageEventInput:
+      type: object
+      required: [external_id, harness, session_id, model, tokens, occurred_at, machine_id, attribution]
+      additionalProperties: false
+      properties:
+        external_id: { type: string, maxLength: 200 }
+        harness: { $ref: "#/components/schemas/Harness" }
+        session_id: { type: string, maxLength: 200 }
+        provider: { type: string, maxLength: 100 }
+        model: { type: string, maxLength: 200 }
+        tokens: { $ref: "#/components/schemas/Tokens" }
+        occurred_at: { type: string, format: date-time }
+        reported_cost_usd_micros: { type: integer, format: int64 }
+        machine_id: { type: string, maxLength: 100 }
+        attribution: { $ref: "#/components/schemas/Attribution" }
+
+    IngestRequest:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          maxItems: 500
+          items: { $ref: "#/components/schemas/UsageEventInput" }
+
+    IngestResult:
+      type: object
+      required: [accepted, duplicates, rejected]
+      properties:
+        accepted: { type: integer }
+        duplicates: { type: integer }
+        rejected:
+          type: array
+          items:
+            type: object
+            required: [external_id, reason]
+            properties:
+              external_id: { type: string }
+              reason: { type: string }
+
+    UserSummary:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        github_login: { type: string }
+
+    UsageEvent:
+      type: object
+      required: [id, external_id, harness, session_id, model, tokens, occurred_at, received_at, user, attribution, cost_usd_micros, priced]
+      properties:
+        id: { type: string, format: uuid }
+        external_id: { type: string }
+        harness: { $ref: "#/components/schemas/Harness" }
+        session_id: { type: string }
+        provider: { type: string }
+        model: { type: string }
+        tokens: { $ref: "#/components/schemas/Tokens" }
+        occurred_at: { type: string, format: date-time }
+        received_at: { type: string, format: date-time }
+        user: { $ref: "#/components/schemas/UserSummary" }
+        attribution: { $ref: "#/components/schemas/Attribution" }
+        cost_usd_micros: { type: integer, format: int64 }
+        reported_cost_usd_micros: { type: integer, format: int64 }
+        priced:
+          type: boolean
+          description: False when the model is missing from the price book and the harness estimate was used.
+
+    UsageEventPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/UsageEvent" }
+        next_cursor: { type: string }
+
+    ReassignRequest:
+      type: object
+      required: [event_ids]
+      properties:
+        event_ids:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items: { type: string, format: uuid }
+        to:
+          $ref: "#/components/schemas/IssueRef"
+        reason: { type: string, maxLength: 500 }
+
+    ReassignResult:
+      type: object
+      required: [updated, skipped]
+      properties:
+        updated: { type: integer }
+        skipped:
+          type: integer
+          description: Events not owned by the caller (non-admin) or not found.
+
+    RepriceRequest:
+      type: object
+      properties:
+        from: { type: string, format: date-time }
+        model: { type: string }
+
+    CountResult:
+      type: object
+      required: [count]
+      properties:
+        count: { type: integer }
+
+    InboxGroup:
+      type: object
+      required: [bucket, harness, session_id, user, first_at, last_at, events, cost_usd_micros, event_ids]
+      properties:
+        bucket: { $ref: "#/components/schemas/Bucket" }
+        repo: { type: string }
+        branch: { type: string }
+        harness: { $ref: "#/components/schemas/Harness" }
+        session_id: { type: string }
+        user: { $ref: "#/components/schemas/UserSummary" }
+        first_at: { type: string, format: date-time }
+        last_at: { type: string, format: date-time }
+        events: { type: integer }
+        models:
+          type: array
+          items: { type: string }
+        cost_usd_micros: { type: integer, format: int64 }
+        event_ids:
+          type: array
+          items: { type: string, format: uuid }
+
+    Task:
+      type: object
+      required: [ref, title, url, state, assignees, labels, cost_usd_micros, tokens, events]
+      properties:
+        ref: { $ref: "#/components/schemas/IssueRef" }
+        title: { type: string }
+        url: { type: string }
+        state: { $ref: "#/components/schemas/TaskState" }
+        assignees:
+          type: array
+          items: { type: string }
+        labels:
+          type: array
+          items: { type: string }
+        branch: { type: string }
+        started_at: { type: string, format: date-time }
+        pr_opened_at: { type: string, format: date-time }
+        pr_number: { type: integer }
+        closed_at: { type: string, format: date-time }
+        cost_usd_micros: { type: integer, format: int64 }
+        tokens: { $ref: "#/components/schemas/Tokens" }
+        events: { type: integer }
+        snapshot_usd_micros:
+          type: integer
+          format: int64
+          description: Cost frozen at close time.
+        adjustment_usd_micros:
+          type: integer
+          format: int64
+          description: Cost accrued after close (late syncs, post-merge work).
+        last_activity_at: { type: string, format: date-time }
+
+    TaskDetail:
+      type: object
+      required: [task, by_model, by_user, by_day]
+      properties:
+        task: { $ref: "#/components/schemas/Task" }
+        by_model:
+          type: array
+          items: { $ref: "#/components/schemas/CostRow" }
+        by_user:
+          type: array
+          items: { $ref: "#/components/schemas/CostRow" }
+        by_day:
+          type: array
+          items: { $ref: "#/components/schemas/CostRow" }
+
+    StartTaskRequest:
+      type: object
+      required: [branch]
+      properties:
+        branch: { type: string }
+
+    RecordPRRequest:
+      type: object
+      required: [pr_number]
+      properties:
+        pr_number: { type: integer, minimum: 1 }
+
+    StatusOption:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+
+    StatusMapOptions:
+      type: object
+      description: Project status option id per lifecycle state.
+      properties:
+        todo: { type: string }
+        in_progress: { type: string }
+        in_review: { type: string }
+        done: { type: string }
+
+    Repository:
+      type: object
+      required: [full_name, default_branch, archived]
+      properties:
+        full_name: { type: string }
+        default_branch: { type: string }
+        archived: { type: boolean }
+        project:
+          type: object
+          required: [id, title, url]
+          properties:
+            id: { type: string }
+            title: { type: string }
+            url: { type: string }
+        status_options:
+          type: array
+          items: { $ref: "#/components/schemas/StatusOption" }
+        status_map: { $ref: "#/components/schemas/StatusMapOptions" }
+        status_map_detected: { type: boolean }
+        missing_states:
+          type: array
+          items: { $ref: "#/components/schemas/TaskState" }
+
+    CostRow:
+      type: object
+      required: [key, label, cost, cost_usd_micros, tokens, events]
+      properties:
+        key: { type: string, description: "Stable grouping key (repo full name, issue ref, user id, model, harness or YYYY-MM-DD)." }
+        label: { type: string, description: Human friendly label. }
+        cost: { type: number, format: double, description: Amount in the report currency. }
+        cost_usd_micros: { type: integer, format: int64 }
+        tokens: { $ref: "#/components/schemas/Tokens" }
+        events: { type: integer }
+
+    CostReport:
+      type: object
+      required: [currency, group_by, total, total_usd_micros, rows]
+      properties:
+        currency: { $ref: "#/components/schemas/Currency" }
+        group_by: { $ref: "#/components/schemas/GroupBy" }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        total: { type: number, format: double }
+        total_usd_micros: { type: integer, format: int64 }
+        unpriced_events:
+          type: integer
+          description: Events priced with the harness estimate because the model has no price.
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/CostRow" }
+
+    Price:
+      type: object
+      required: [id, model, input, output, cache_read, cache_write, effective_from, source]
+      properties:
+        id: { type: integer, format: int64 }
+        provider: { type: string }
+        model: { type: string }
+        input: { type: number, format: double, description: USD per 1M tokens }
+        output: { type: number, format: double }
+        cache_read: { type: number, format: double }
+        cache_write: { type: number, format: double }
+        effective_from: { type: string, format: date-time }
+        source: { type: string, enum: [models.dev, manual] }
+
+    PriceInput:
+      type: object
+      required: [model, input, output, effective_from]
+      properties:
+        provider: { type: string }
+        model: { type: string }
+        input: { type: number, format: double, minimum: 0 }
+        output: { type: number, format: double, minimum: 0 }
+        cache_read: { type: number, format: double, minimum: 0 }
+        cache_write: { type: number, format: double, minimum: 0 }
+        effective_from: { type: string, format: date-time }

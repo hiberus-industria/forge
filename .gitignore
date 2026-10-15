@@ -1,0 +1,6 @@
+/bin/
+/dist/
+*.forge-tmp
+coverage.out
+.env
+deploy/secrets/
