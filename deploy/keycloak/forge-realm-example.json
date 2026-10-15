@@ -1,0 +1,158 @@
+{
+  "realm": "hiberus",
+  "enabled": true,
+  "sslRequired": "external",
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "oauth2DeviceCodeLifespan": 600,
+  "oauth2DevicePollingInterval": 5,
+  "roles": {
+    "client": {
+      "forge-api": [
+        {
+          "name": "member",
+          "description": "Read everything, reassign own usage"
+        },
+        {
+          "name": "admin",
+          "description": "Prices, status mappings, reassign any usage"
+        }
+      ]
+    }
+  },
+  "groups": [
+    {
+      "name": "forge-members",
+      "clientRoles": {
+        "forge-api": [
+          "member"
+        ]
+      }
+    },
+    {
+      "name": "forge-admins",
+      "clientRoles": {
+        "forge-api": [
+          "member",
+          "admin"
+        ]
+      }
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "forge-api",
+      "name": "forge API (resource server)",
+      "description": "Audience and role container for the forge API. No login flows.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "false"
+      }
+    },
+    {
+      "clientId": "forge-cli",
+      "name": "forge CLI",
+      "description": "Public native client used by the forge CLI, daemon and TUI.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://127.0.0.1/callback"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "oauth2.device.authorization.grant.enabled": "true",
+        "post.logout.redirect.uris": "http://127.0.0.1/logged-out"
+      },
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "basic",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "offline_access"
+      ],
+      "protocolMappers": [
+        {
+          "name": "forge-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "forge-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "dev",
+      "enabled": true,
+      "email": "dev@example.com",
+      "emailVerified": true,
+      "firstName": "Dev",
+      "lastName": "Forge",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/forge-admins"
+      ],
+      "realmRoles": [
+        "default-roles-hiberus",
+        "offline_access"
+      ]
+    },
+    {
+      "username": "member",
+      "enabled": true,
+      "email": "member@example.com",
+      "emailVerified": true,
+      "firstName": "Member",
+      "lastName": "Forge",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "member",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/forge-members"
+      ],
+      "realmRoles": [
+        "default-roles-hiberus",
+        "offline_access"
+      ]
+    }
+  ]
+}

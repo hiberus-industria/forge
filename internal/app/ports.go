@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -40,6 +41,10 @@ var (
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrInvalid      = errors.New("invalid request")
 	ErrConflict     = errors.New("conflict")
+	ErrUnavailable  = errors.New("unavailable")
+
+	// ErrNoGitHub is returned when the GitHub App is not configured.
+	ErrNoGitHub = fmt.Errorf("%w: GitHub integration is not configured on the server", ErrUnavailable)
 )
 
 // TokenVerifier validates bearer tokens (Keycloak JWT via JWKS).

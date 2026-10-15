@@ -21,10 +21,10 @@ const (
 type Step string
 
 const (
-	StepStart Step = "start"
-	StepPR    Step = "pr"
-	StepMerge Step = "merge"
-	StepClose Step = "close"  // closed without merge (won't do, duplicate...)
+	StepStart  Step = "start"
+	StepPR     Step = "pr"
+	StepMerge  Step = "merge"
+	StepClose  Step = "close" // closed without merge (won't do, duplicate...)
 	StepReopen Step = "reopen"
 )
 

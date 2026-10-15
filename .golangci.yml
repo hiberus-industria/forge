@@ -1,0 +1,59 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - revive
+    - bodyclose
+    - errorlint
+  settings:
+    govet:
+      disable:
+        # False positives on generic call sites (type parameter inference).
+        - inline
+    revive:
+      rules:
+        # Light rule set: only what catches real mistakes or helps readers.
+        - name: blank-imports
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unreachable-code
+        - name: var-declaration
+  exclusions:
+    generated: lax
+    paths:
+      - internal/api/api.gen.go
+    rules:
+      - path: _test\.go
+        linters: [errcheck, bodyclose]
+      # Best-effort cleanup and terminal output: nothing useful to do on error.
+      - linters: [errcheck]
+        text: "Error return value of `.*\\.(Close|Rollback)` is not checked"
+      - linters: [errcheck]
+        text: "Error return value of `(fmt|lipgloss)\\.Fprint(ln|f)?` is not checked"
+      - linters: [errcheck]
+        text: "Error return value of `os\\.Remove` is not checked"
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/hiberus-industria/forge

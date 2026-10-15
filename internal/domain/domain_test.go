@@ -110,6 +110,13 @@ func TestPriceCostAndLookup(t *testing.T) {
 	if p, ok := pb.Lookup("litellm", "glm-5", day(2)); !ok || p.ID != 3 {
 		t.Fatalf("provider-agnostic manual price not found")
 	}
+	withManual := NewPriceBook([]Price{
+		{ID: 10, Provider: "anthropic", Model: "claude-sonnet-5-5", Input: 3, EffectiveFrom: day(5), Source: PriceSourceModelsDev},
+		{ID: 11, Model: "claude-sonnet-5-5", Input: 1, EffectiveFrom: day(1), Source: PriceSourceManual},
+	})
+	if p, _ := withManual.Lookup("anthropic", "claude-sonnet-5-5", day(20)); p.ID != 11 {
+		t.Fatalf("manual price must win over newer seed, got %d", p.ID)
+	}
 	cost := p.Cost(Tokens{Input: 1_000_000, Output: 100_000, CacheRead: 1_000_000, CacheWrite: 10_000})
 	// 3 + 1.5 + 0.3 + 0.0375 = 4.8375 USD
 	if cost != 4_837_500 {
@@ -154,8 +161,10 @@ func TestDetectStatusMap(t *testing.T) {
 }
 
 func TestUsageValidate(t *testing.T) {
-	e := UsageEvent{ExternalID: "r1", Harness: HarnessClaudeCode, Model: "m", OccurredAt: time.Now(),
-		Attribution: Attribute(AttributionInput{Org: org})}
+	e := UsageEvent{
+		ExternalID: "r1", Harness: HarnessClaudeCode, Model: "m", OccurredAt: time.Now(),
+		Attribution: Attribute(AttributionInput{Org: org}),
+	}
 	if err := e.Validate(); err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,14 @@
+# Local Keycloak for development only (H2 in-memory, admin/admin).
+# The import file must be named <realm>-realm.json inside the container.
+#   make dev-keycloak  →  http://localhost:8180  realm "hiberus"  users dev/dev (admin), member/member
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ["start-dev", "--import-realm", "--http-port=8180"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "8180:8180"
+    volumes:
+      - ./forge-realm-example.json:/opt/keycloak/data/import/hiberus-realm.json:ro

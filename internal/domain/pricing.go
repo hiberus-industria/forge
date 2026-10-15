@@ -94,32 +94,33 @@ func NewPriceBook(prices []Price) *PriceBook {
 	return pb
 }
 
-// Lookup returns the price for provider/model at the given instant. A price
-// with a matching provider is preferred over a provider-agnostic one.
+// Lookup returns the price for provider/model at the given instant, by
+// precedence:
+//
+//  1. the latest manual price for the provider or without provider (admins
+//     override seeds, e.g. corporate gateway models);
+//  2. the latest seeded price for the same provider;
+//  3. the latest provider-agnostic price;
+//  4. any provider's price for the model.
 func (pb *PriceBook) Lookup(provider, model string, at time.Time) (Price, bool) {
-	cands := pb.byModel[NormalizeModel(model)]
 	provider = strings.ToLower(provider)
-	var fallback *Price
-	for i := range cands {
-		p := cands[i]
-		if p.EffectiveFrom.After(at) {
-			continue
-		}
+	matches := func(p Price) bool {
 		pp := strings.ToLower(p.Provider)
-		if pp == provider && provider != "" {
-			return p, true
-		}
-		if fallback == nil && (pp == "" || provider == "" || p.Source == PriceSourceManual) {
-			fallback = &cands[i]
-		}
+		return pp == "" || pp == provider
 	}
-	if fallback != nil {
-		return *fallback, true
+	rules := []func(Price) bool{
+		func(p Price) bool { return p.Source == PriceSourceManual && matches(p) },
+		func(p Price) bool { return provider != "" && strings.EqualFold(p.Provider, provider) },
+		func(p Price) bool { return p.Provider == "" },
+		func(Price) bool { return true },
 	}
-	// Last resort: any provider's price for the model.
-	for _, p := range cands {
-		if !p.EffectiveFrom.After(at) {
-			return p, true
+	cands := pb.byModel[NormalizeModel(model)]
+	for _, rule := range rules {
+		// cands is sorted newest first, so the first hit is the latest.
+		for _, p := range cands {
+			if !p.EffectiveFrom.After(at) && rule(p) {
+				return p, true
+			}
 		}
 	}
 	return Price{}, false

@@ -1,0 +1,60 @@
+# Production stack on a single VM: Caddy (automatic HTTPS) -> forge-api -> PostgreSQL.
+# Usage: cp .env.example .env && docker compose up -d
+name: forge
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: forge
+      POSTGRES_DB: forge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forge -d forge"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: ${FORGE_API_IMAGE:-ghcr.io/hiberus-industria/forge-api:latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      FORGE_LISTEN_ADDR: ":8080"
+      FORGE_DATABASE_URL: postgres://forge:${POSTGRES_PASSWORD}@postgres:5432/forge?sslmode=disable
+      FORGE_GITHUB_PRIVATE_KEY_FILE: /run/secrets/github-app.pem
+    volumes:
+      - ./secrets/github-app.pem:/run/secrets/github-app.pem:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # distroless has no shell/curl: Caddy's health checks and /readyz cover liveness.
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      FORGE_DOMAIN: ${FORGE_DOMAIN:?set FORGE_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

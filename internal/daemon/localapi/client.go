@@ -145,7 +145,7 @@ func (c *Client) Live(ctx context.Context) (<-chan LiveEvent, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "text/event-stream")
-	resp, err := c.stream.Do(req)
+	resp, err := c.stream.Do(req) //nolint:bodyclose // closed by the reader goroutine below
 	if err != nil {
 		return nil, ErrDaemonDown
 	}

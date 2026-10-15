@@ -1,0 +1,64 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# GoReleaser v2. Builds the developer CLI (`forge`) for Linux/macOS (WSL2 uses
+# the Linux build). The API image is built by .github/workflows/release.yml.
+#
+# Team defaults are baked into the binary so that `install.sh` ships a
+# ready-to-use CLI. Set them as repository variables in GitHub Actions:
+#   FORGE_DEFAULT_API_URL, FORGE_DEFAULT_OIDC_ISSUER,
+#   FORGE_DEFAULT_OIDC_CLIENT_ID, FORGE_DEFAULT_ORG
+version: 2
+
+project_name: forge
+
+before:
+  hooks:
+    - go generate ./internal/api
+
+builds:
+  - id: forge
+    main: ./cmd/forge
+    binary: forge
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/hiberus-industria/forge/internal/cli.version={{ .Version }}
+      - -X github.com/hiberus-industria/forge/internal/cli.commit={{ .ShortCommit }}
+      - -X github.com/hiberus-industria/forge/internal/cli.date={{ .Date }}
+      - -X github.com/hiberus-industria/forge/internal/config.DefaultAPIURL={{ envOrDefault "FORGE_DEFAULT_API_URL" "http://localhost:8080" }}
+      - -X github.com/hiberus-industria/forge/internal/config.DefaultOIDCIssuer={{ envOrDefault "FORGE_DEFAULT_OIDC_ISSUER" "http://localhost:8180/realms/hiberus" }}
+      - -X github.com/hiberus-industria/forge/internal/config.DefaultOIDCClientID={{ envOrDefault "FORGE_DEFAULT_OIDC_CLIENT_ID" "forge-cli" }}
+      - -X github.com/hiberus-industria/forge/internal/config.DefaultOrg={{ envOrDefault "FORGE_DEFAULT_ORG" "hiberus-industria" }}
+
+archives:
+  - id: forge
+    ids: [forge]
+    formats: [tar.gz]
+    # install.sh relies on this exact name: forge_<os>_<arch>.tar.gz
+    name_template: "forge_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  github:
+    owner: hiberus-industria
+    name: forge
+  prerelease: auto
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

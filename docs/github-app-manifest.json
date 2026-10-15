@@ -1,0 +1,24 @@
+{
+  "name": "forge (hiberus-industria)",
+  "url": "https://github.com/hiberus-industria/forge",
+  "description": "Traceability of AI spend per repository and issue. Syncs issues, PRs and Project status for forge.",
+  "public": false,
+  "hook_attributes": {
+    "url": "https://forge.example.com/webhooks/github",
+    "active": true
+  },
+  "redirect_url": "https://forge.example.com/",
+  "default_permissions": {
+    "issues": "write",
+    "pull_requests": "read",
+    "metadata": "read",
+    "members": "read",
+    "organization_projects": "write"
+  },
+  "default_events": [
+    "issues",
+    "pull_request",
+    "repository",
+    "projects_v2_item"
+  ]
+}
