@@ -1,40 +1,40 @@
- ◆ forge   1 Tareas   2 En vivo   3 Bandeja   4 Informes                                            ● daemon  ·  @aruiz 
- Bandeja · mía · 29 sesiones sin asignar                                                              pendiente 11.45 € 
- ❯ ○ ◇ web ⎇ main                                                                                                0.05 € 
-       OpenCode · 4 peticiones · glm-5 · hace 21 h · @aruiz                                                             
-   ○ ◇ infra ⎇ main                                                                                              0.10 € 
-       OpenCode · 8 peticiones · glm-5 · hace 2 d · @aruiz                                                              
-   ○ ✻ api ⎇ main                                                                                                0.54 € 
-       Claude Code · 13 peticiones · sonnet-5-5, haiku-5-5 · hace 3 d · @aruiz                                          
-   ○ ✻ personal / otros                                                                                          1.10 € 
-       Claude Code · 5 peticiones · opus-5-5 · hace 4 d · @aruiz                                                        
-   ○ ◇ personal / otros                                                                                          0.04 € 
-       OpenCode · 4 peticiones · glm-5 · hace 5 d · @aruiz                                                              
-   ○ ✻ web ⎇ main                                                                                                0.12 € 
-       Claude Code · 7 peticiones · haiku-5-5 · hace 7 d · @aruiz                                                       
-   ○ ✻ web ⎇ main                                                                                                1.30 € 
-       Claude Code · 8 peticiones · opus-5-5, haiku-5-5 · hace 9 d · @aruiz                                             
-   ○ ✻ personal / otros                                                                                          0.30 € 
-       Claude Code · 9 peticiones · sonnet-5-5, haiku-5-5 · hace 9 d · @aruiz                                           
-   ○ ◇ infra ⎇ main                                                                                              0.18 € 
-       OpenCode · 17 peticiones · glm-5 · hace 11 d · @aruiz                                                            
-   ○ ✻ api ⎇ main                                                                                                0.49 € 
-       Claude Code · 12 peticiones · sonnet-5-5, haiku-5-5 · hace 11 d · @aruiz                                         
-   ○ ✻ personal / otros                                                                                          0.11 € 
-       Claude Code · 7 peticiones · haiku-5-5 · hace 11 d · @aruiz                                                      
-   ○ ✻ web ⎇ main                                                                                                0.45 € 
-       Claude Code · 10 peticiones · sonnet-5-5 · hace 13 d · @aruiz                                                    
-   ○ ✻ web ⎇ main                                                                                                0.31 € 
-       Claude Code · 7 peticiones · sonnet-5-5, haiku-5-5 · hace 14 d · @aruiz                                          
-   ○ ✻ web ⎇ main                                                                                                0.41 € 
-       Claude Code · 9 peticiones · sonnet-5-5, haiku-5-5 · hace 15 d · @aruiz                                          
-   ○ ✻ web ⎇ main                                                                                                0.33 € 
-       Claude Code · 8 peticiones · haiku-5-5, sonnet-5-5 · hace 15 d · @aruiz                                          
-   ○ ✻ api ⎇ main                                                                                                0.25 € 
-       Claude Code · 8 peticiones · sonnet-5-5, haiku-5-5 · hace 16 d · @aruiz                                          
-   ○ ✻ web ⎇ main                                                                                                0.46 € 
-       Claude Code · 10 peticiones · sonnet-5-5 · hace 16 d · @aruiz                                                    
-                                                                                                                        
-                                                                                                                        
+ forge   Tareas  En vivo  Bandeja 29  Informes                                                        ● al día   @aruiz 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- espacio marcar • A marcar todo • enter asignar a tarea • a mías/equipo • r recargar • ? ayuda • q salir
+  Mía · Equipo                                                                        29 sesiones sin asignar  11.45 €
+  Gasto que no se pudo asociar a una tarea: sesiones fuera de la rama de un issue.
+  
+       repositorio      rama                              herramienta  modelos              pet.  última         coste
+  ▌ ○  web              main                              OpenCode     glm-5                   4  hace 21 h     0.05 €
+    ○  infra            main                              OpenCode     glm-5                   8  hace 2 d      0.10 €
+    ○  api              main                              Claude Code  sonnet-5-5, haiku…     13  hace 3 d      0.54 €
+    ○  sin repositorio  —                                 Claude Code  opus-5-5                5  hace 4 d      1.10 €
+    ○  sin repositorio  —                                 OpenCode     glm-5                   4  hace 5 d      0.04 €
+    ○  web              main                              Claude Code  haiku-5-5               7  hace 7 d      0.12 €
+    ○  web              main                              Claude Code  opus-5-5, haiku-5…      8  hace 9 d      1.30 €
+    ○  sin repositorio  —                                 Claude Code  sonnet-5-5, haiku…      9  hace 9 d      0.30 €
+    ○  infra            main                              OpenCode     glm-5                  17  hace 11 d     0.18 €
+    ○  api              main                              Claude Code  sonnet-5-5, haiku…     12  hace 11 d     0.49 €
+    ○  sin repositorio  —                                 Claude Code  haiku-5-5               7  hace 11 d     0.11 €
+    ○  web              main                              Claude Code  sonnet-5-5             10  hace 13 d     0.45 €
+    ○  web              main                              Claude Code  sonnet-5-5, haiku…      7  hace 14 d     0.31 €
+    ○  web              main                              Claude Code  sonnet-5-5, haiku…      9  hace 15 d     0.41 €
+    ○  web              main                              Claude Code  haiku-5-5, sonnet…      8  hace 15 d     0.33 €
+    ○  api              main                              Claude Code  sonnet-5-5, haiku…      8  hace 16 d     0.25 €
+    ○  web              main                              Claude Code  sonnet-5-5             10  hace 16 d     0.46 €
+    ○  api              main                              OpenCode     qwen3-coder-plus        8  hace 19 d     0.07 €
+    ○  api              main                              OpenCode     glm-5                  11  hace 20 d     0.12 €
+    ○  infra            main                              Claude Code  opus-5-5, haiku-5…      5  hace 21 d     0.85 €
+    ○  api              main                              Claude Code  sonnet-5-5             10  hace 22 d     0.45 €
+    ○  infra            main                              OpenCode     glm-5                  12  hace 23 d     0.11 €
+    ○  sin repositorio  —                                 Claude Code  haiku-5-5, opus-5…      7  hace 23 d     1.19 €
+    ○  infra            main                              Claude Code  sonnet-5-5, haiku…      9  hace 25 d     0.37 €
+    ○  api              main                              OpenCode     qwen3-coder-plus       15  hace 26 d     0.14 €
+    ○  web              main                              Claude Code  sonnet-5-5, haiku…      6  hace 26 d     0.29 €
+    ○  web              main                              Claude Code  haiku-5-5               7  hace 27 d     0.11 €
+    ○  infra            main                              Claude Code  sonnet-5-5, haiku…      5  hace 28 d     0.16 €
+    ○  web              main                              Claude Code  haiku-5-5, opus-5…      8  hace 28 d     1.05 €
+  
+  
+  
+
+ enter asignar a una tarea   espacio marcar   / buscar   a mía / equipo                               ? ayuda   q salir 

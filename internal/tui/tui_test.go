@@ -49,7 +49,7 @@ func within(cmd tea.Cmd, d time.Duration) tea.Msg {
 
 // drive executes cmd and feeds resulting messages back into the model.
 func drive(m tea.Model, cmd tea.Cmd, depth int) tea.Model {
-	if cmd == nil || depth > 8 {
+	if cmd == nil || depth > 12 {
 		return m
 	}
 	msg := within(cmd, 250*time.Millisecond)
@@ -88,6 +88,8 @@ func keyMsg(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyEscape}
 	case "down":
 		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "right":
+		return tea.KeyPressMsg{Code: tea.KeyRight}
 	}
 	r := []rune(s)[0]
 	return tea.KeyPressMsg{Code: r, Text: s}
@@ -159,7 +161,7 @@ func TestTabKeysAndCapture(t *testing.T) {
 	if m.active != 0 {
 		t.Fatal("digits must go to the filter while capturing")
 	}
-	if v := m.screens[0].(*tasksScreen).filter.Value(); v != "2q" {
+	if v := m.screens[0].(*tasksScreen).list.Query(); v != "2q" {
 		t.Fatalf("filter value = %q", v)
 	}
 	m = press(m, "esc", "3")
@@ -189,7 +191,7 @@ func TestInboxSelectionAndReassign(t *testing.T) {
 		t.Fatalf("cost = %d", cost)
 	}
 
-	// Full flow: enter opens the picker, typed ref + confirm reassigns.
+	// Full flow: enter opens the picker, a typed ref + enter reassigns.
 	before := len(in.groups)
 	m = press(m, "enter")
 	if _, ok := m.modal.(*pickerModal); !ok {
@@ -199,10 +201,9 @@ func TestInboxSelectionAndReassign(t *testing.T) {
 		m = press(m, string(r))
 	}
 	m = press(m, "enter")
-	if _, ok := m.modal.(*confirmModal); !ok {
-		t.Fatalf("expected confirm modal, got %T", m.modal)
+	if m.modal != nil {
+		t.Fatalf("picker should assign directly, got %T", m.modal)
 	}
-	m = press(m, "enter")
 	in = m.screens[2].(*inboxScreen)
 	if len(in.groups) >= before {
 		t.Fatalf("inbox should shrink after reassigning: before %d after %d", before, len(in.groups))
@@ -278,7 +279,8 @@ func TestTasksGroupingAndFilter(t *testing.T) {
 			t.Fatal("tasks must be grouped by repository")
 		}
 	}
-	ts.filter.SetValue("keycloak")
+	ts.list.query = "keycloak"
+	ts.list.refilter()
 	if v := ts.visible(); len(v) != 1 {
 		t.Fatalf("filter keycloak = %d tasks", len(v))
 	}
@@ -330,12 +332,16 @@ func TestNarrowLightWithModalAndToast(t *testing.T) {
 			}
 		}
 	}
-	m = press(m, "1", "enter") // narrow: full-screen detail
-	m = press(m, "s")
-	if _, ok := m.modal.(*choiceModal); !ok {
-		t.Fatalf("expected chooser, got %T", m.modal)
+	m = press(m, "1", "right") // narrow: full-screen detail
+	if !m.screens[0].(*tasksScreen).showDetail {
+		t.Fatal("right should open the detail on narrow layouts")
 	}
-	if out := ansi.Strip(m.render()); !strings.Contains(out, "Empezar hiberus-industria/api#100") {
+	m = press(m, "enter") // actions menu
+	if _, ok := m.modal.(*choiceModal); !ok {
+		t.Fatalf("expected actions menu, got %T", m.modal)
+	}
+	m = press(m, "s") // start → branch type chooser
+	if out := ansi.Strip(m.render()); !strings.Contains(out, "¿Qué tipo de trabajo es?") {
 		t.Fatalf("modal not composed over the screen:\n%s", out)
 	}
 }

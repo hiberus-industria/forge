@@ -2,11 +2,13 @@ package tui
 
 import (
 	"fmt"
-	"image/color"
-	"math"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -89,6 +91,15 @@ func pad(s string, w int) string {
 	return s
 }
 
+// padLines pads (or cuts) every line of a block to w cells.
+func padLines(s string, w int) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = pad(l, w)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // padLeft left-pads to w cells.
 func padLeft(s string, w int) string {
 	s = trunc(s, w)
@@ -107,74 +118,75 @@ func spread(left, right string, w int) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
-// bar renders a horizontal bar of value/maxV over width cells using eighth
-// blocks for sub-cell precision, coloured along the gradient.
-func bar(value, maxV float64, width int, cols []color.Color) string {
-	if width <= 0 || maxV <= 0 || value <= 0 {
-		return ""
-	}
-	cells := value / maxV * float64(width)
-	full := int(cells)
-	frac := cells - float64(full)
-	eighths := []string{"", "▏", "▎", "▍", "▌", "▋", "▊", "▉"}
-	grad := lipgloss.Blend1D(max(width, 2), cols...)
-	var b strings.Builder
-	for i := 0; i < full && i < width; i++ {
-		b.WriteString(lipgloss.NewStyle().Foreground(grad[i]).Render("█"))
-	}
-	if full < width {
-		if e := eighths[int(frac*8)]; e != "" {
-			b.WriteString(lipgloss.NewStyle().Foreground(grad[full]).Render(e))
-		} else if full == 0 {
-			b.WriteString(lipgloss.NewStyle().Foreground(grad[0]).Render("▏"))
-		}
-	}
-	return b.String()
-}
-
-// sparkline renders values with ▁▂▃▄▅▆▇█, scaled to the maximum.
-func sparkline(values []float64, c color.Color) string {
-	ticks := []rune("▁▂▃▄▅▆▇█")
-	maxV := 0.0
-	for _, v := range values {
-		maxV = math.Max(maxV, v)
-	}
-	on := lipgloss.NewStyle().Foreground(c)
-	off := lipgloss.NewStyle().Faint(true)
-	var b strings.Builder
-	for _, v := range values {
-		if maxV <= 0 || v <= 0 {
-			b.WriteString(off.Render("▁"))
-			continue
-		}
-		i := max(1, int(math.Round(v/maxV*float64(len(ticks)-1))))
-		b.WriteString(on.Render(string(ticks[i])))
-	}
-	return b.String()
-}
-
-// statePill renders the lifecycle state badge.
-func statePill(s *theme.Styles, st api.TaskState) string {
+// stateGlyph is the lifecycle state as one coloured glyph. Only work in
+// progress gets the accent; closed work is green, the rest stays neutral.
+func stateGlyph(s *theme.Styles, st api.TaskState) (string, lipgloss.Style) {
 	switch st {
 	case api.InProgress:
-		return s.Pill("EN CURSO", s.Info)
+		return "●", s.Hi
 	case api.InReview:
-		return s.Pill("REVISIÓN", s.Secondary)
+		return "◐", s.Base
 	case api.Done:
-		return s.Pill("HECHO", s.Success)
+		return "✓", s.OK
 	default:
-		return s.Pill("PENDIENTE", s.Muted)
+		return "○", s.Dim
 	}
 }
 
-func harnessIcon(s *theme.Styles, h string) string {
-	switch h {
-	case "claude-code":
-		return lipgloss.NewStyle().Foreground(s.Accent).Render("✻")
-	case "opencode":
-		return lipgloss.NewStyle().Foreground(s.Info).Render("◇")
+func stateName(st api.TaskState) string {
+	switch st {
+	case api.InProgress:
+		return "En curso"
+	case api.InReview:
+		return "En revisión"
+	case api.Done:
+		return "Cerrada"
 	}
-	return s.Faint.Render("•")
+	return "Pendiente"
+}
+
+// stateLabel renders glyph plus name.
+func stateLabel(s *theme.Styles, st api.TaskState) string {
+	g, gs := stateGlyph(s, st)
+	return gs.Render(g) + " " + s.Faint.Render(stateName(st))
+}
+
+// openURL opens url in the default browser (WSL included).
+func openURL(url string) tea.Cmd {
+	return func() tea.Msg {
+		var cmd *exec.Cmd
+		switch {
+		case runtime.GOOS == "darwin":
+			cmd = exec.Command("open", url)
+		case os.Getenv("WSL_DISTRO_NAME") != "":
+			cmd = exec.Command("cmd.exe", "/c", "start", "", strings.ReplaceAll(url, "&", "^&"))
+		default:
+			cmd = exec.Command("xdg-open", url)
+		}
+		if err := cmd.Start(); err != nil {
+			return toastMsg{kind: toastErr, text: "No se pudo abrir el navegador: " + err.Error()}
+		}
+		go func() { _ = cmd.Wait() }()
+		return nil
+	}
+}
+
+// copyText puts text in the clipboard (OSC 52) and confirms it.
+func copyText(text, what string) tea.Cmd {
+	return tea.Batch(tea.SetClipboard(text), toast(toastOK, what+" copiado al portapapeles"))
+}
+
+// shortDate renders a day as "mié 14 oct".
+func shortDate(t time.Time) string {
+	days := []string{"dom", "lun", "mar", "mié", "jue", "vie", "sáb"}
+	months := []string{"ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"}
+	return fmt.Sprintf("%s %d %s", days[t.Weekday()], t.Day(), months[t.Month()-1])
+}
+
+// dayMonth renders a day as "14 oct".
+func dayMonth(t time.Time) string {
+	months := []string{"ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"}
+	return fmt.Sprintf("%d %s", t.Day(), months[t.Month()-1])
 }
 
 func harnessName(h string) string {

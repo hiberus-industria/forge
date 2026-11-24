@@ -3,14 +3,14 @@ package tui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"os/exec"
 	"sort"
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -18,36 +18,27 @@ import (
 	"github.com/hiberus-industria/forge/internal/daemon/localapi"
 	"github.com/hiberus-industria/forge/internal/devflow"
 	"github.com/hiberus-industria/forge/internal/domain"
+	"github.com/hiberus-industria/forge/internal/tui/theme"
 )
 
-type tasksKeys struct {
-	Up, Down, Detail, Filter, Mine, States, Refresh, Start, PR, Override, Unassign key.Binding
-}
-
-func (k tasksKeys) ShortHelp() []key.Binding {
-	return []key.Binding{k.Start, k.PR, k.Override, k.Detail, k.Filter, k.Mine}
-}
-
-func (k tasksKeys) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{k.Up, k.Down, k.Detail, k.Filter},
-		{k.Mine, k.States, k.Refresh},
-		{k.Start, k.PR, k.Override, k.Unassign},
-	}
-}
-
-var taskKeyMap = tasksKeys{
-	Up:       key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "subir")),
-	Down:     key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "bajar")),
-	Detail:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detalle")),
-	Filter:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filtrar")),
-	Mine:     key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "mías/todas")),
-	States:   key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "estado")),
+var taskKeys = struct {
+	Actions, Detail, Back, Scroll, Filter, Mine, States, Refresh, Start, PR, Pin, Unpin, Unassign, Open, Copy key.Binding
+}{
+	Actions:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "acciones")),
+	Detail:   key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→", "detalle")),
+	Back:     key.NewBinding(key.WithKeys("left", "h", "esc"), key.WithHelp("←", "volver")),
+	Scroll:   key.NewBinding(key.WithKeys("J", "K"), key.WithHelp("J K", "mover el detalle")),
+	Filter:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "buscar")),
+	Mine:     key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "mías / equipo")),
+	States:   key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "cambiar estado")),
 	Refresh:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "recargar")),
 	Start:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "empezar")),
 	PR:       key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "abrir PR")),
-	Override: key.NewBinding(key.WithKeys("o", "O"), key.WithHelp("o/O", "fijar/quitar tarea activa")),
-	Unassign: key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "devolver a bandeja")),
+	Pin:      key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "imputar todo aquí")),
+	Unpin:    key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "dejar de imputar aquí")),
+	Unassign: key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "devolver a la bandeja")),
+	Open:     key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "abrir en GitHub")),
+	Copy:     key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copiar enlace")),
 }
 
 // stateFilters are the presets cycled with `f`.
@@ -55,10 +46,10 @@ var stateFilters = []struct {
 	label  string
 	states []api.TaskState
 }{
-	{"activas", []api.TaskState{api.Todo, api.InProgress, api.InReview}},
-	{"en curso", []api.TaskState{api.InProgress, api.InReview}},
-	{"cerradas", []api.TaskState{api.Done}},
-	{"todas", nil},
+	{"Abiertas", []api.TaskState{api.Todo, api.InProgress, api.InReview}},
+	{"En curso", []api.TaskState{api.InProgress, api.InReview}},
+	{"Cerradas", []api.TaskState{api.Done}},
+	{"Todas", nil},
 }
 
 type tasksLoadedMsg struct {
@@ -85,30 +76,89 @@ type tasksScreen struct {
 
 	all         bool
 	stateFilter int
-	filter      textinput.Model
-	filtering   bool
 
-	cursor     int
-	detail     *api.TaskDetail
-	detailKey  string
-	detailSeq  int
-	detailErr  error
-	showDetail bool // narrow layouts: full-screen detail toggle
+	list   rowList[api.Task]
+	detail viewport.Model
+	width  int
+	height int
+
+	info       *api.TaskDetail
+	infoKey    string
+	infoSeq    int
+	infoErr    error
+	showDetail bool // narrow layouts: full-screen detail
+}
+
+func taskText(t api.Task) string {
+	return fmt.Sprintf("%s#%d %s %s", t.Ref.Repo, t.Ref.Number, t.Title, strings.Join(t.Labels, " "))
 }
 
 func newTasksScreen(sh *shared) *tasksScreen {
-	ti := textinput.New()
-	ti.Prompt = "/ "
-	ti.Placeholder = "título, repo, #número o etiqueta"
-	ti.SetStyles(inputStyles(sh.st))
-	ti.SetWidth(40)
-	return &tasksScreen{sh: sh, filter: ti, loading: true}
+	m := &tasksScreen{sh: sh, loading: true}
+	m.list = newRowList(sh.st, taskText)
+	m.detail = viewport.New()
+	return m
 }
 
-func (m *tasksScreen) Keys() help.KeyMap { return taskKeyMap }
-func (m *tasksScreen) Capturing() bool   { return m.filtering }
+func (m *tasksScreen) restyle(s *theme.Styles) { m.list.restyle(s) }
 
-func (m *tasksScreen) Init() tea.Cmd { return m.load() }
+func (m *tasksScreen) Hints() []key.Binding {
+	switch {
+	case m.list.Filtering():
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "aplicar")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "quitar")),
+		}
+	case m.showDetail && !m.wide():
+		return []key.Binding{taskKeys.Back, taskKeys.Actions, navKeys.UpDown}
+	case !m.wide():
+		return []key.Binding{taskKeys.Actions, taskKeys.Detail, taskKeys.Start, taskKeys.PR, taskKeys.Filter}
+	}
+	return []key.Binding{taskKeys.Actions, taskKeys.Start, taskKeys.PR, taskKeys.Filter, taskKeys.Mine}
+}
+
+func (m *tasksScreen) Help() []helpGroup {
+	move := []key.Binding{navKeys.Up, navKeys.Down, navKeys.PgUp, navKeys.PgDown}
+	if m.wide() {
+		move = append(move, taskKeys.Scroll)
+	} else {
+		move = append(move, taskKeys.Detail, taskKeys.Back)
+	}
+	return []helpGroup{
+		{"Moverse", move},
+		{"Sobre la tarea", []key.Binding{taskKeys.Actions, taskKeys.Start, taskKeys.PR, taskKeys.Pin, taskKeys.Unpin, taskKeys.Unassign, taskKeys.Open, taskKeys.Copy}},
+		{"Lista", []key.Binding{taskKeys.Filter, taskKeys.Mine, taskKeys.States, taskKeys.Refresh}},
+	}
+}
+
+func (m *tasksScreen) Capturing() bool { return m.list.Filtering() }
+func (m *tasksScreen) Init() tea.Cmd   { return m.load() }
+
+// wide reports whether list and detail fit side by side.
+func (m *tasksScreen) wide() bool { return m.width >= 100 }
+
+// listWidth is the list column width in the wide layout.
+func (m *tasksScreen) listWidth() int {
+	if !m.wide() {
+		return m.width
+	}
+	return m.width * 56 / 100
+}
+
+// Body rows: toolbar, gap, then the list (and detail).
+const tasksChrome = 2
+
+func (m *tasksScreen) SetSize(w, h int) {
+	m.width, m.height = w, h
+	m.list.SetHeight(h - tasksChrome)
+	if m.wide() {
+		m.detail.SetWidth(w - m.listWidth() - 3)
+	} else {
+		m.detail.SetWidth(w)
+	}
+	m.detail.SetHeight(max(1, h-tasksChrome))
+	m.syncDetail()
+}
 
 func (m *tasksScreen) load() tea.Cmd {
 	m.seq++
@@ -134,19 +184,9 @@ func (m *tasksScreen) load() tea.Cmd {
 
 var stateOrder = map[api.TaskState]int{api.InProgress: 0, api.InReview: 1, api.Todo: 2, api.Done: 3}
 
-// visible returns the filtered tasks sorted by repo, state and recency.
-func (m *tasksScreen) visible() []api.Task {
-	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
-	out := make([]api.Task, 0, len(m.tasks))
-	for _, t := range m.tasks {
-		if q != "" {
-			hay := strings.ToLower(fmt.Sprintf("%s#%d %s %s", t.Ref.Repo, t.Ref.Number, t.Title, strings.Join(t.Labels, " ")))
-			if !strings.Contains(hay, strings.TrimPrefix(q, "#")) {
-				continue
-			}
-		}
-		out = append(out, t)
-	}
+// sortTasks orders tasks by repo, state and recency.
+func sortTasks(ts []api.Task) []api.Task {
+	out := append([]api.Task(nil), ts...)
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
 		if a.Ref.Repo != b.Ref.Repo {
@@ -160,25 +200,23 @@ func (m *tasksScreen) visible() []api.Task {
 	return out
 }
 
-func (m *tasksScreen) selected() (api.Task, bool) {
-	v := m.visible()
-	if m.cursor < 0 || m.cursor >= len(v) {
-		return api.Task{}, false
-	}
-	return v[m.cursor], true
-}
+// visible returns the tasks the list shows, in order (filter applied).
+func (m *tasksScreen) visible() []api.Task { return m.list.Visible() }
+
+func (m *tasksScreen) selected() (api.Task, bool) { return m.list.Selected() }
 
 func taskKey(t api.Task) string { return fmt.Sprintf("%s#%d", t.Ref.Repo, t.Ref.Number) }
 
 // scheduleDetail debounces detail fetching while the cursor moves.
 func (m *tasksScreen) scheduleDetail() tea.Cmd {
 	t, ok := m.selected()
-	if !ok || taskKey(t) == m.detailKey {
+	if !ok || taskKey(t) == m.infoKey {
 		return nil
 	}
-	m.detailSeq++
-	seq := m.detailSeq
-	return tea.Tick(180*time.Millisecond, func(time.Time) tea.Msg { return detailDebounceMsg{seq} })
+	m.infoSeq++
+	seq := m.infoSeq
+	m.detail.GotoTop()
+	return tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg { return detailDebounceMsg{seq} })
 }
 
 func (m *tasksScreen) fetchDetail(t api.Task) tea.Cmd {
@@ -197,142 +235,212 @@ func (m *tasksScreen) fetchDetail(t api.Task) tea.Cmd {
 }
 
 func (m *tasksScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
+	cmd := m.update(msg)
+	m.syncDetail()
+	return m, cmd
+}
+
+func (m *tasksScreen) update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tasksLoadedMsg:
 		if msg.seq != m.seq {
-			return m, nil
+			return nil
 		}
 		m.loading = false
 		m.err = msg.err
-		if msg.err == nil {
-			m.tasks = msg.tasks
-			m.cursor = min(m.cursor, max(0, len(m.visible())-1))
-			m.detailKey = ""
-			return m, m.scheduleDetail()
+		if msg.err != nil {
+			return nil
 		}
-		return m, nil
+		m.tasks = sortTasks(msg.tasks)
+		for _, t := range m.tasks {
+			m.sh.titles[taskKey(t)] = t.Title
+		}
+		m.list.SetItems(m.tasks, taskKey)
+		m.infoKey = ""
+		return m.scheduleDetail()
 	case detailDebounceMsg:
-		if msg.seq == m.detailSeq {
+		if msg.seq == m.infoSeq {
 			if t, ok := m.selected(); ok {
-				return m, m.fetchDetail(t)
+				return m.fetchDetail(t)
 			}
 		}
+		return nil
 	case taskDetailMsg:
 		if t, ok := m.selected(); ok && taskKey(t) == msg.key {
-			m.detailKey = msg.key
-			m.detailErr = msg.err
+			m.infoKey, m.infoErr = msg.key, msg.err
 			if msg.err == nil {
 				d := msg.detail
-				m.detail = &d
+				m.info = &d
 			}
 		}
+		return nil
 	case refreshMsg:
-		m.detailKey = ""
-		return m, m.load()
+		m.infoKey = ""
+		return m.load()
 	case tea.MouseWheelMsg:
-		switch msg.Button {
-		case tea.MouseWheelUp:
-			return m, m.move(-1)
-		case tea.MouseWheelDown:
-			return m, m.move(1)
+		if m.showDetail || (m.wide() && msg.X > m.listWidth()) {
+			var cmd tea.Cmd
+			m.detail, cmd = m.detail.Update(msg)
+			return cmd
 		}
+		m.list.Wheel(msg)
+		return m.scheduleDetail()
+	case tea.MouseClickMsg:
+		if !m.showDetail && msg.X < m.listWidth() && m.list.Click(msg.Y-tasksChrome) {
+			return m.scheduleDetail()
+		}
+		return nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
-	return m, nil
-}
-
-func (m *tasksScreen) move(d int) tea.Cmd {
-	n := len(m.visible())
-	if n == 0 {
-		return nil
+	if m.list.Filtering() {
+		var cmd tea.Cmd
+		m.list.input, cmd = m.list.input.Update(msg)
+		return cmd
 	}
-	m.cursor = max(0, min(n-1, m.cursor+d))
-	return m.scheduleDetail()
+	return nil
 }
 
-func (m *tasksScreen) handleKey(k tea.KeyPressMsg) (screen, tea.Cmd) {
-	if m.filtering {
-		switch k.String() {
-		case "esc":
-			m.filtering = false
-			m.filter.SetValue("")
-			m.filter.Blur()
-			m.cursor = 0
-			return m, m.scheduleDetail()
-		case "enter":
-			m.filtering = false
-			m.filter.Blur()
-			return m, m.scheduleDetail()
-		case "up", "down":
-			// allow navigating while filtering
-		default:
+func (m *tasksScreen) handleKey(k tea.KeyPressMsg) tea.Cmd {
+	if m.list.Filtering() {
+		return tea.Batch(m.list.FilterKey(k), m.scheduleDetail())
+	}
+	if m.showDetail && !m.wide() {
+		switch {
+		case key.Matches(k, taskKeys.Back):
+			m.showDetail = false
+			return nil
+		case key.Matches(k, navKeys.Up, navKeys.Down, navKeys.PgUp, navKeys.PgDown):
 			var cmd tea.Cmd
-			m.filter, cmd = m.filter.Update(k)
-			m.cursor = 0
-			return m, tea.Batch(cmd, m.scheduleDetail())
+			m.detail, cmd = m.detail.Update(k)
+			return cmd
 		}
 	}
 	switch {
-	case key.Matches(k, taskKeyMap.Up):
-		return m, m.move(-1)
-	case key.Matches(k, taskKeyMap.Down):
-		return m, m.move(1)
-	case k.String() == "g" || k.String() == "home":
-		m.cursor = 0
-		return m, m.scheduleDetail()
-	case k.String() == "G" || k.String() == "end":
-		m.cursor = max(0, len(m.visible())-1)
-		return m, m.scheduleDetail()
-	case key.Matches(k, taskKeyMap.Detail):
-		m.showDetail = !m.showDetail
-	case key.Matches(k, taskKeyMap.Filter):
-		m.filtering = true
-		return m, m.filter.Focus()
-	case k.String() == "esc":
-		if m.showDetail {
-			m.showDetail = false
-		} else if m.filter.Value() != "" {
-			m.filter.SetValue("")
-			m.cursor = 0
+	case k.String() == "esc" && m.list.Query() != "":
+		m.list.ClearFilter()
+		return m.scheduleDetail()
+	case key.Matches(k, taskKeys.Filter):
+		return m.list.StartFilter()
+	case key.Matches(k, taskKeys.Detail):
+		if !m.wide() {
+			m.showDetail = true
+			m.detail.GotoTop()
 		}
-	case key.Matches(k, taskKeyMap.Mine):
+		return nil
+	case key.Matches(k, taskKeys.Scroll):
+		if k.String() == "J" {
+			m.detail.ScrollDown(3)
+		} else {
+			m.detail.ScrollUp(3)
+		}
+		return nil
+	case key.Matches(k, taskKeys.Actions):
+		return m.actionsMenu()
+	case key.Matches(k, taskKeys.Mine):
 		m.all = !m.all
-		m.cursor = 0
-		return m, m.load()
-	case key.Matches(k, taskKeyMap.States):
+		m.list.Top()
+		return m.load()
+	case key.Matches(k, taskKeys.States):
 		m.stateFilter = (m.stateFilter + 1) % len(stateFilters)
-		m.cursor = 0
-		return m, m.load()
-	case key.Matches(k, taskKeyMap.Refresh):
-		return m, m.load()
-	case key.Matches(k, taskKeyMap.Start):
-		return m, m.startAction()
-	case key.Matches(k, taskKeyMap.PR):
-		return m, m.prAction()
-	case k.String() == "o":
-		return m, m.overrideAction()
-	case k.String() == "O":
-		return m, m.clearOverride()
-	case key.Matches(k, taskKeyMap.Unassign):
-		return m, m.unassignAction()
+		m.list.Top()
+		return m.load()
+	case key.Matches(k, taskKeys.Refresh):
+		return m.load()
 	}
-	return m, nil
+	if cmd, ok := m.runAction(k.String()); ok {
+		return cmd
+	}
+	if m.list.Nav(k) {
+		return m.scheduleDetail()
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------- actions
 
-func (m *tasksScreen) startAction() tea.Cmd {
+// actions are what can be done with the selected task. The menu (enter)
+// and the direct keys share this list, so both always agree.
+func (m *tasksScreen) actions(t api.Task) []choice {
+	var start, unassign string
+	if t.State == api.Done {
+		start = "la tarea está cerrada"
+	}
+	if t.CostUsdMicros == 0 {
+		unassign = "no tiene gasto"
+	}
+	pinned := false
+	if st := m.sh.status; st != nil && st.Override != nil {
+		pinned = st.Override.Issue.Repo.String() == t.Ref.Repo && st.Override.Issue.Number == t.Ref.Number
+	}
+	pin := choice{key: "o", label: "Imputar todo el gasto aquí", hint: "aunque cambies de rama"}
+	if pinned {
+		pin = choice{key: "O", label: "Dejar de imputar aquí", hint: "vuelve a mandar la rama"}
+	}
+	return []choice{
+		{key: "s", label: "Empezar a trabajar", hint: "crea su rama", disabled: start},
+		{key: "p", label: "Abrir pull request", hint: "y pasarla a revisión"},
+		pin,
+		{key: "u", label: "Devolver gasto a la bandeja", hint: "si se imputó por error", disabled: unassign},
+		{key: "w", label: "Abrir en GitHub"},
+		{key: "y", label: "Copiar enlace"},
+	}
+}
+
+func (m *tasksScreen) actionsMenu() tea.Cmd {
 	t, ok := m.selected()
 	if !ok {
 		return nil
 	}
+	opts := m.actions(t)
+	return openModal(&choiceModal{
+		title:    fmt.Sprintf("%s#%d", shortRepo(t.Ref.Repo, m.sh.org), t.Ref.Number),
+		subtitle: t.Title,
+		opts:     opts,
+		onPick: func(i int) tea.Cmd {
+			cmd, _ := m.runAction(opts[i].key)
+			return cmd
+		},
+	})
+}
+
+// runAction runs the action bound to k on the selected task.
+func (m *tasksScreen) runAction(k string) (tea.Cmd, bool) {
+	t, ok := m.selected()
+	if !ok {
+		return nil, false
+	}
+	for _, a := range m.actions(t) {
+		if a.key != k {
+			continue
+		}
+		if a.disabled != "" {
+			return toast(toastWarn, "No disponible: "+a.disabled), true
+		}
+		switch k {
+		case "s":
+			return m.startAction(t), true
+		case "p":
+			return m.prAction(t), true
+		case "o":
+			return m.pinAction(t), true
+		case "O":
+			return m.clearPin(), true
+		case "u":
+			return m.unassignAction(t), true
+		case "w":
+			return openURL(t.Url), true
+		case "y":
+			return copyText(t.Url, "Enlace"), true
+		}
+	}
+	return nil, false
+}
+
+func (m *tasksScreen) startAction(t api.Task) tea.Cmd {
 	ref, err := issueRef(t.Ref)
 	if err != nil {
 		return toast(toastErr, err.Error())
-	}
-	if t.State == api.Done {
-		return toast(toastWarn, "La tarea está cerrada: reábrela en GitHub para continuar")
 	}
 	def := domain.BranchTypeFromLabels(t.Labels)
 	opts := make([]choice, 0, len(domain.BranchTypes))
@@ -345,55 +453,52 @@ func (m *tasksScreen) startAction() tea.Cmd {
 	}
 	sh := m.sh
 	return openModal(&choiceModal{
-		title:    "Empezar " + ref.String(),
-		subtitle: t.Title,
+		title:    "¿Qué tipo de trabajo es?",
+		subtitle: "Crea la rama y mueve " + ref.String() + " a En curso.",
 		opts:     opts,
 		cursor:   cursor,
 		onPick: func(i int) tea.Cmd {
 			bt := domain.BranchTypes[i]
-			fm, cmd := newFlowModal(sh.st, "Empezando "+ref.String(), func(progress func(string)) (string, error) {
+			fm, cmd := newFlowModal(sh.st, "Empezando "+ref.String(), func(progress func(string)) (flowResult, error) {
 				res, err := sh.be.Start(sh.ctx, devflow.StartOptions{Issue: ref, Type: bt, Progress: progress})
 				if err != nil {
-					return "", err
+					return flowResult{}, err
 				}
 				if res.Created {
-					return "Rama " + res.Branch + " creada. ¡A por ello!", nil
+					return flowResult{text: "Listo. Estás en la rama nueva " + res.Branch + "."}, nil
 				}
-				return "Rama " + res.Branch + " activada.", nil
+				return flowResult{text: "Listo. Has vuelto a la rama " + res.Branch + "."}, nil
 			})
 			return tea.Batch(openModal(fm), cmd)
 		},
 	})
 }
 
-func (m *tasksScreen) prAction() tea.Cmd {
-	t, ok := m.selected()
-	if !ok {
-		return nil
-	}
+func (m *tasksScreen) prAction(t api.Task) tea.Cmd {
 	ref, err := issueRef(t.Ref)
 	if err != nil {
 		return toast(toastErr, err.Error())
 	}
 	sh := m.sh
 	return openModal(&choiceModal{
-		title:    "Abrir PR · " + ref.String(),
-		subtitle: t.Title,
+		title:    "Abrir pull request",
+		subtitle: ref.String() + " · " + t.Title,
 		opts: []choice{
-			{label: "Lista para revisión", hint: "mueve el Project a In Review"},
-			{label: "Borrador (draft)", hint: "se puede marcar lista más tarde"},
+			{label: "Lista para revisar", hint: "pasa la tarea a En revisión"},
+			{label: "Borrador", hint: "la marcas como lista más tarde"},
 		},
 		onPick: func(i int) tea.Cmd {
 			draft := i == 1
-			fm, cmd := newFlowModal(sh.st, "Abriendo PR para "+ref.String(), func(progress func(string)) (string, error) {
+			fm, cmd := newFlowModal(sh.st, "Abriendo la PR de "+ref.String(), func(progress func(string)) (flowResult, error) {
 				r, err := sh.be.OpenPR(sh.ctx, devflow.PROptions{Issue: &ref, Draft: draft, Progress: progress})
 				if err != nil {
-					return "", err
+					return flowResult{}, err
 				}
+				label := fmt.Sprintf("%s#%d", ref.Repo, r.Number)
 				if r.Existing {
-					return fmt.Sprintf("Ya existía la PR #%d · %s", r.Number, r.URL), nil
+					return flowResult{text: fmt.Sprintf("La PR #%d ya existía.", r.Number), url: r.URL, urlLabel: label}, nil
 				}
-				return fmt.Sprintf("PR #%d abierta · %s", r.Number, r.URL), nil
+				return flowResult{text: fmt.Sprintf("PR #%d abierta.", r.Number), url: r.URL, urlLabel: label}, nil
 			})
 			return tea.Batch(openModal(fm), cmd)
 		},
@@ -408,11 +513,7 @@ func gitTopLevel() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func (m *tasksScreen) overrideAction() tea.Cmd {
-	t, ok := m.selected()
-	if !ok {
-		return nil
-	}
+func (m *tasksScreen) pinAction(t api.Task) tea.Cmd {
 	ref, err := issueRef(t.Ref)
 	if err != nil {
 		return toast(toastErr, err.Error())
@@ -431,15 +532,15 @@ func (m *tasksScreen) overrideAction() tea.Cmd {
 			if _, err := sh.be.SetOverride(sh.ctx, req); err != nil {
 				return errMsg{err}
 			}
-			return toastMsg{kind: toastOK, text: "Tarea activa: " + ref.String() + " (atribución manual)"}
+			return toastMsg{kind: toastOK, text: "Desde ahora, el gasto nuevo va a " + ref.String()}
 		}
 	}
 	return openModal(&choiceModal{
-		title:    "Fijar tarea activa",
-		subtitle: "Todo el gasto nuevo se imputará a " + ref.String() + ", sin importar la rama.",
+		title:    "Imputar todo el gasto a " + ref.String(),
+		subtitle: "Útil cuando trabajas fuera de la rama de la tarea. Se deshace con O.",
 		opts: []choice{
-			{label: "Solo en este repositorio", hint: "sesiones dentro del repo actual"},
-			{label: "Global", hint: "cualquier sesión de esta máquina"},
+			{label: "Solo en este repositorio", hint: "sesiones abiertas dentro del repo actual"},
+			{label: "En toda la máquina", hint: "cualquier sesión"},
 		},
 		onPick: func(i int) tea.Cmd {
 			if i == 0 {
@@ -450,36 +551,32 @@ func (m *tasksScreen) overrideAction() tea.Cmd {
 	})
 }
 
-func (m *tasksScreen) clearOverride() tea.Cmd {
+func (m *tasksScreen) clearPin() tea.Cmd {
 	sh := m.sh
 	return tea.Sequence(func() tea.Msg {
 		if err := sh.be.ClearOverride(sh.ctx); err != nil {
 			return errMsg{err}
 		}
-		return toastMsg{kind: toastInfo, text: "Tarea activa eliminada: vuelve a mandar la rama"}
+		return toastMsg{kind: toastInfo, text: "Hecho: el gasto vuelve a imputarse según la rama"}
 	}, statusNow(sh))
 }
 
-func (m *tasksScreen) unassignAction() tea.Cmd {
-	t, ok := m.selected()
-	if !ok {
-		return nil
-	}
+func (m *tasksScreen) unassignAction(t api.Task) tea.Cmd {
 	ref, err := issueRef(t.Ref)
 	if err != nil {
 		return toast(toastErr, err.Error())
 	}
 	sh := m.sh
 	return openModal(&confirmModal{
-		title: "Devolver a la bandeja",
-		body:  fmt.Sprintf("Tus eventos de %s volverán a la bandeja sin asignar para reasignarlos. ¿Continuar?", ref),
+		title: "¿Devolver tu gasto a la bandeja?",
+		body:  fmt.Sprintf("Tus peticiones de %s pasarán a la bandeja, donde podrás asignarlas a otra tarea. El gasto de otras personas no se toca.", ref),
 		onYes: func() tea.Msg {
 			r, err := sh.be.UnassignTask(sh.ctx, ref)
 			if err != nil {
 				return errMsg{err}
 			}
 			return tea.BatchMsg{
-				toast(toastOK, fmt.Sprintf("%d eventos devueltos a la bandeja", r.Updated)),
+				toast(toastOK, plural(r.Updated, "petición devuelta", "peticiones devueltas")+" a la bandeja"),
 				refresh,
 			}
 		},
@@ -488,214 +585,260 @@ func (m *tasksScreen) unassignAction() tea.Cmd {
 
 // ---------------------------------------------------------------- view
 
-func (m *tasksScreen) View(width, height int) string {
+func (m *tasksScreen) toolbar() string {
 	s := m.sh.st
-	scope := "mías"
-	if m.all {
-		scope = "de todo el equipo"
+	if m.list.Filtering() || m.list.Query() != "" {
+		return m.list.FilterView(s, m.width)
 	}
-	vis := m.visible()
+	scope := 0
+	if m.all {
+		scope = 1
+	}
+	labels := make([]string, len(stateFilters))
+	for i, f := range stateFilters {
+		labels[i] = f.label
+	}
+	left := segmented(s, []string{"Mías", "Equipo"}, scope) + "     " + segmented(s, labels, m.stateFilter)
 	var total int64
-	for _, t := range vis {
+	for _, t := range m.visible() {
 		total += t.CostUsdMicros
 	}
-	title := s.Title.Render("Tareas") + s.Faint.Render(fmt.Sprintf(" · %s · %s · %d", scope, stateFilters[m.stateFilter].label, len(vis)))
-	right := s.Faint.Render("total ") + s.Bold.Render(m.sh.money(total))
-	head := spread(title, right, width)
-	if m.filtering || m.filter.Value() != "" {
-		head += "\n" + m.filter.View()
+	right := s.Faint.Render(plural(m.list.Len(), "tarea", "tareas")+"  ") + s.Bold.Render(m.sh.money(total))
+	if m.loading && len(m.tasks) > 0 {
+		right = s.Faint.Render("actualizando…  ") + right
 	}
-	bodyH := height - lipgloss.Height(head) - 1
-
-	if m.loading && len(m.tasks) == 0 {
-		return head + "\n" + center(s.Faint.Render("Cargando tareas…"), width, bodyH)
-	}
-	if m.err != nil && len(m.tasks) == 0 {
-		return head + "\n" + center(lipgloss.NewStyle().Foreground(s.Danger).Render("✗ "+m.err.Error())+"\n\n"+s.Faint.Render("r para reintentar"), width, bodyH)
-	}
-	if len(vis) == 0 {
-		msg := s.Bold.Render("No hay tareas aquí") + "\n\n" + s.Faint.Render("Prueba con ") + s.Key.Render("a") + s.Faint.Render(" (todas) o ") + s.Key.Render("f") + s.Faint.Render(" (estado).")
-		return head + "\n" + center(msg, width, bodyH)
-	}
-
-	wide := width >= 110
-	listW := width
-	if wide {
-		listW = width * 58 / 100
-	}
-	if !wide && m.showDetail {
-		return head + "\n" + m.detailView(width, bodyH)
-	}
-	list := m.listView(vis, listW, bodyH)
-	if !wide {
-		return head + "\n" + list
-	}
-	return head + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, list, " ", m.detailView(width-listW-1, bodyH))
+	return spread(left, right, m.width)
 }
 
-func (m *tasksScreen) listView(vis []api.Task, width, height int) string {
+func (m *tasksScreen) View() string {
 	s := m.sh.st
-	// Build display lines (repo headers + task rows), tracking the cursor line.
-	type line struct {
-		text string
-		task int // -1 for headers
-	}
-	var lines []line
-	repoTotals := map[string]int64{}
-	repoCounts := map[string]int{}
-	for _, t := range vis {
-		repoTotals[t.Ref.Repo] += t.CostUsdMicros
-		repoCounts[t.Ref.Repo]++
-	}
-	costW, tokW, pillW := 10, 7, 11
-	titleW := width - 2 - 7 - pillW - costW - tokW - 4
-	cursorLine := 0
-	prev := ""
-	for i, t := range vis {
-		if t.Ref.Repo != prev {
-			prev = t.Ref.Repo
-			h := lipgloss.NewStyle().Foreground(s.Secondary).Bold(true).Render("▍"+shortRepo(t.Ref.Repo, m.sh.org)) +
-				s.Faint.Render(fmt.Sprintf("  %d · %s", repoCounts[t.Ref.Repo], m.sh.money(repoTotals[t.Ref.Repo])))
-			if len(lines) > 0 {
-				lines = append(lines, line{"", -1})
-			}
-			lines = append(lines, line{h, -1})
+	width, bodyH := m.width, max(1, m.height-tasksChrome)
+	head := m.toolbar() + "\n\n"
+
+	switch {
+	case m.loading && len(m.tasks) == 0:
+		return head + center(s.Faint.Render("Cargando tareas…"), width, bodyH)
+	case m.err != nil && len(m.tasks) == 0:
+		return head + emptyState(s, width, bodyH, s.Err.Render("No se pudieron cargar las tareas"), m.err.Error(), "Pulsa r para reintentar.")
+	case len(m.tasks) == 0:
+		if m.all {
+			return head + emptyState(s, width, bodyH, "No hay tareas con este estado", "Pulsa f para ver otro estado.")
 		}
-		num := s.Faint.Render(padLeft(fmt.Sprintf("#%d", t.Ref.Number), 6))
-		title := t.Title
-		if t.AdjustmentUsdMicros != nil && *t.AdjustmentUsdMicros != 0 {
-			title += " " + lipgloss.NewStyle().Foreground(s.Warning).Render("Δ+"+m.sh.money(*t.AdjustmentUsdMicros)+" tras cierre")
-		}
-		row := num + " " + pad(title, titleW) + " " + pad(statePill(s, t.State), pillW) + " " +
-			padLeft(s.Bold.Render(m.sh.money(t.CostUsdMicros)), costW) + " " +
-			padLeft(s.Faint.Render(humanTokens(totalTokens(t.Tokens))), tokW)
-		if i == m.cursor {
-			cursorLine = len(lines)
-			row = lipgloss.NewStyle().Foreground(s.Primary).Bold(true).Render("❯ ") + row
-			row = s.Selected.Width(width).Render(row)
-		} else {
-			row = "  " + row
-		}
-		lines = append(lines, line{row, i})
+		return head + emptyState(s, width, bodyH, "No tienes tareas asignadas con este estado",
+			"Pulsa a para ver las del equipo o f para cambiar el estado.",
+			"Para empezar una desde la terminal: forge start <número>")
+	case m.list.Len() == 0:
+		return head + emptyState(s, width, bodyH, "Ninguna tarea coincide con la búsqueda", "Pulsa esc para quitar el filtro.")
 	}
-	start, end := window(len(lines), cursorLine, height)
-	out := make([]string, 0, height)
-	for _, l := range lines[start:end] {
-		out = append(out, l.text)
+
+	if !m.wide() {
+		if m.showDetail {
+			return head + m.detail.View()
+		}
+		return head + m.listView(width)
 	}
-	return lipgloss.NewStyle().Width(width).Render(fitHeight(strings.Join(out, "\n"), height))
+	lw := m.listWidth()
+	sep := s.Rule.Render(strings.TrimSuffix(strings.Repeat("│\n", bodyH), "\n"))
+	return head + lipgloss.JoinHorizontal(lipgloss.Top, padLines(m.listView(lw), lw), " ", sep, "  ", m.detail.View())
 }
 
-func (m *tasksScreen) detailView(width, height int) string {
+func (m *tasksScreen) listView(width int) string {
+	s := m.sh.st
+	refW := 0
+	for _, t := range m.list.Visible() {
+		refW = max(refW, lipgloss.Width(fmt.Sprintf("%s#%d", shortRepo(t.Ref.Repo, m.sh.org), t.Ref.Number)))
+	}
+	terms := m.list.Terms()
+	return m.list.View(width, func(t api.Task, sel bool, w int) string {
+		g, gs := stateGlyph(s, t.State)
+		titleSt := s.Base
+		if sel {
+			titleSt = s.Bold.Background(s.Surface)
+		}
+		cost, costSt := m.sh.money(t.CostUsdMicros), s.Base
+		if t.CostUsdMicros == 0 {
+			cost, costSt = "—", s.Dim
+		}
+		return row(s, w, sel,
+			col{text: g, w: 1, st: gs},
+			col{text: fmt.Sprintf("%s#%d", shortRepo(t.Ref.Repo, m.sh.org), t.Ref.Number), w: refW, st: s.Faint},
+			col{text: mark(t.Title, terms, titleSt), raw: true},
+			col{text: cost, w: 9, right: true, st: costSt},
+		)
+	})
+}
+
+// syncDetail refreshes the detail viewport content for the selected task.
+func (m *tasksScreen) syncDetail() {
+	if m.detail.Width() <= 0 {
+		return
+	}
+	m.detail.SetContent(m.detailContent(m.detail.Width()))
+}
+
+// prURL derives the pull request URL from the issue URL.
+func prURL(issueURL string, n int) string {
+	if i := strings.LastIndex(issueURL, "/issues/"); i >= 0 {
+		return fmt.Sprintf("%s/pull/%d", issueURL[:i], n)
+	}
+	return ""
+}
+
+func (m *tasksScreen) detailContent(width int) string {
 	s := m.sh.st
 	t, ok := m.selected()
 	if !ok {
 		return ""
 	}
-	inner := width - 4
-	var b strings.Builder
-	b.WriteString(s.Faint.Render(fmt.Sprintf("%s#%d", shortRepo(t.Ref.Repo, m.sh.org), t.Ref.Number)) + "  " + statePill(s, t.State) + "\n")
-	b.WriteString(s.Bold.Width(inner).Render(t.Title) + "\n\n")
+	var lines []string
+	add := func(l ...string) { lines = append(lines, l...) }
+	ref := fmt.Sprintf("%s#%d", shortRepo(t.Ref.Repo, m.sh.org), t.Ref.Number)
 
-	cost := lipgloss.NewStyle().Foreground(s.Primary).Bold(true).Render(m.sh.money(t.CostUsdMicros))
-	if alt := m.sh.moneyAlt(t.CostUsdMicros); alt != "" {
+	add(link(s, t.Url, ref) + "   " + stateLabel(s, t.State))
+	add(strings.Split(s.Bold.Width(width).Render(t.Title), "\n")...)
+	add("")
+	cost := s.Hi.Render(m.sh.money(t.CostUsdMicros))
+	if alt := m.sh.moneyAlt(t.CostUsdMicros); alt != "" && t.CostUsdMicros > 0 {
 		cost += s.Faint.Render("  ≈ " + alt)
 	}
-	b.WriteString(cost + s.Faint.Render(fmt.Sprintf("  · %d peticiones", t.Events)) + "\n")
+	add(cost)
+	add(s.Faint.Render(plural(t.Events, "petición", "peticiones") + " · " + humanTokens(totalTokens(t.Tokens)) + " tokens"))
 	if t.SnapshotUsdMicros != nil {
-		b.WriteString(s.Faint.Render("congelado al cerrar: "+m.sh.money(*t.SnapshotUsdMicros)) + "\n")
+		add(s.Faint.Render("Al cerrarla costaba ") + s.Base.Render(m.sh.money(*t.SnapshotUsdMicros)))
 	}
+	if t.AdjustmentUsdMicros != nil && *t.AdjustmentUsdMicros != 0 {
+		add(s.Warn.Render("+" + m.sh.money(*t.AdjustmentUsdMicros) + " después de cerrarla"))
+	}
+
+	add("")
+	kv := func(k, v string) { add(s.Faint.Render(pad(k, 8)) + trunc(v, width-8)) }
 	if t.Branch != nil && *t.Branch != "" {
-		b.WriteString(s.Faint.Render("rama ") + s.Base.Render(*t.Branch) + "\n")
+		kv("Rama", s.Base.Render(*t.Branch))
 	}
 	if t.PrNumber != nil {
-		b.WriteString(s.Faint.Render("PR ") + s.Base.Render(fmt.Sprintf("#%d", *t.PrNumber)) + "\n")
+		kv("PR", link(s, prURL(t.Url, *t.PrNumber), fmt.Sprintf("#%d", *t.PrNumber)))
 	}
 	if t.StartedAt != nil {
-		b.WriteString(s.Faint.Render("empezada "+ago(*t.StartedAt, m.sh.now())) + "\n")
+		kv("Inicio", s.Base.Render(ago(*t.StartedAt, m.sh.now())))
 	}
-	b.WriteString("\n" + s.Heading.Render("Tokens") + "\n")
-	b.WriteString(tokenBars(m.sh, t.Tokens, inner))
+	if t.LastActivityAt != nil {
+		kv("Último", s.Base.Render(ago(*t.LastActivityAt, m.sh.now())))
+	}
+	if len(t.Assignees) > 0 {
+		kv("Equipo", s.Base.Render("@"+strings.Join(t.Assignees, " @")))
+	}
 
-	if m.detail != nil && m.detailKey == taskKey(t) {
-		d := m.detail
+	if totalTokens(t.Tokens) > 0 {
+		add("", s.Section.Render("Tokens"))
+		add(tokenBreakdown(s, t.Tokens, width)...)
+	}
+
+	switch {
+	case m.info != nil && m.infoKey == taskKey(t):
+		d := m.info
 		if len(d.ByModel) > 0 {
-			b.WriteString("\n" + s.Heading.Render("Por modelo") + "\n")
-			b.WriteString(costRows(m.sh, d.ByModel, inner, 4, shortModel))
+			add("", s.Section.Render("Por modelo"))
+			add(costRows(m.sh, d.ByModel, width, 4, shortModel)...)
 		}
-		if len(d.ByUser) > 0 {
-			b.WriteString("\n" + s.Heading.Render("Por persona") + "\n")
-			b.WriteString(costRows(m.sh, d.ByUser, inner, 4, nil))
+		if len(d.ByUser) > 1 {
+			add("", s.Section.Render("Por persona"))
+			add(costRows(m.sh, d.ByUser, width, 4, nil)...)
 		}
 		if len(d.ByDay) > 1 {
 			vals := make([]float64, len(d.ByDay))
 			for i, r := range d.ByDay {
 				vals[i] = float64(r.CostUsdMicros)
 			}
-			first, last := d.ByDay[0].Key, d.ByDay[len(d.ByDay)-1].Key
-			b.WriteString("\n" + s.Heading.Render("Por día") + "  " + s.Faint.Render(first+" → "+last) + "\n")
-			b.WriteString(sparkline(vals, s.Primary) + "\n")
+			first, last := dayLabel(d.ByDay[0].Key), dayLabel(d.ByDay[len(d.ByDay)-1].Key)
+			add("", spread(s.Section.Render("Por día"), s.Dim.Render(first+" → "+last), width))
+			add(sparkline(vals, s.Primary, s.Border))
 		}
-	} else if m.detailErr != nil {
-		b.WriteString("\n" + lipgloss.NewStyle().Foreground(s.Danger).Render("✗ "+m.detailErr.Error()))
-	} else {
-		b.WriteString("\n" + s.Faint.Render("cargando desglose…"))
+	case m.infoErr != nil:
+		add("", s.Err.Render(m.infoErr.Error()))
+	case t.CostUsdMicros > 0:
+		add("", s.Dim.Render("Cargando desglose…"))
 	}
-	content := strings.TrimRight(b.String(), "\n")
-	h := min(height, lipgloss.Height(content)+2)
-	return s.Card.Width(width).Render(fitHeight(content, h-2))
+	return strings.Join(lines, "\n")
 }
 
-// tokenBars renders a mini bar per token kind.
-func tokenBars(sh *shared, t api.Tokens, width int) string {
-	s := sh.st
+// dayLabel renders an API day key (2006-01-02) as "14 oct".
+func dayLabel(k string) string {
+	if d, err := time.Parse("2006-01-02", k); err == nil {
+		return dayMonth(d)
+	}
+	return k
+}
+
+// tokenBreakdown renders the token mix as one stacked bar plus a legend.
+func tokenBreakdown(s *theme.Styles, t api.Tokens, width int) []string {
 	kinds := []struct {
 		label string
 		v     int64
+		c     color.Color
 	}{
-		{"entrada", t.Input}, {"salida", t.Output}, {"razonam.", t.Reasoning}, {"caché lect.", t.CacheRead}, {"caché escr.", t.CacheWrite},
+		{"entrada", t.Input, s.Primary},
+		{"salida", t.Output, s.Accent},
+		{"razonamiento", t.Reasoning, s.Secondary},
+		{"caché leída", t.CacheRead, s.Info},
+		{"caché escrita", t.CacheWrite, s.Warning},
 	}
-	var maxV int64
-	for _, k := range kinds {
-		maxV = max(maxV, k.v)
-	}
-	barW := max(4, width-12-8)
-	var b strings.Builder
+	total := float64(totalTokens(t))
+	var vals []float64
+	var cols []color.Color
+	var legend []string
 	for _, k := range kinds {
 		if k.v == 0 {
 			continue
 		}
-		b.WriteString(s.Faint.Render(pad(k.label, 12)) + pad(bar(float64(k.v), float64(maxV), barW, s.Gradient), barW) + " " + padLeft(humanTokens(k.v), 7) + "\n")
+		vals = append(vals, float64(k.v))
+		cols = append(cols, k.c)
+		legend = append(legend, lipgloss.NewStyle().Foreground(k.c).Render("■")+" "+
+			s.Faint.Render(fmt.Sprintf("%s %.0f%%", k.label, float64(k.v)/total*100)))
 	}
-	if b.Len() == 0 {
-		return s.Faint.Render("sin uso todavía") + "\n"
+	// The legend wraps by item, never in the middle of one.
+	out := []string{stacked(vals, cols, width)}
+	line := ""
+	for _, l := range legend {
+		switch {
+		case line == "":
+			line = l
+		case lipgloss.Width(line)+3+lipgloss.Width(l) > width:
+			out = append(out, line)
+			line = l
+		default:
+			line += "   " + l
+		}
 	}
-	return b.String()
+	return append(out, line)
 }
 
-// costRows renders the top n rows with bars.
-func costRows(sh *shared, rows []api.CostRow, width, n int, label func(string) string) string {
+// costRows renders the top n rows as shares of their total.
+func costRows(sh *shared, rows []api.CostRow, width, n int, label func(string) string) []string {
 	s := sh.st
-	var maxV int64
+	var total, top int64
 	for _, r := range rows {
-		maxV = max(maxV, r.CostUsdMicros)
+		total += r.CostUsdMicros
+		top = max(top, r.CostUsdMicros)
 	}
-	labelW := min(18, width/3)
-	costW := 9
-	barW := max(4, width-labelW-costW-2)
-	var b strings.Builder
+	labelW, costW := min(14, width/3), 9
+	barW := max(4, width-labelW-costW-4)
+	var out []string
 	for i, r := range rows {
 		if i >= n {
-			b.WriteString(s.Faint.Render(fmt.Sprintf("… y %d más", len(rows)-n)) + "\n")
+			out = append(out, s.Dim.Render(fmt.Sprintf("y %d más", len(rows)-n)))
 			break
 		}
 		l := r.Label
 		if label != nil {
 			l = label(l)
 		}
-		b.WriteString(pad(l, labelW) + " " + pad(bar(float64(r.CostUsdMicros), float64(maxV), barW, sh.st.Gradient), barW) + " " + padLeft(sh.money(r.CostUsdMicros), costW) + "\n")
+		frac := 0.0
+		if top > 0 {
+			frac = float64(r.CostUsdMicros) / float64(top)
+		}
+		out = append(out, s.Base.Render(pad(l, labelW))+"  "+meter(s, frac, barW, s.Primary)+"  "+s.Base.Render(padLeft(sh.money(r.CostUsdMicros), costW)))
 	}
-	return b.String()
+	return out
 }
 
 // statusNow fetches the daemon status immediately (after override changes).

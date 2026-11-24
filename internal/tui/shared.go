@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/hiberus-industria/forge/internal/daemon/localapi"
@@ -28,7 +28,12 @@ type shared struct {
 	height    int
 	now       func() time.Time
 	exportDir string
+	// titles caches issue titles ("owner/repo#n" → title) seen by any
+	// screen, so the feed and the reports can name tasks.
+	titles map[string]string
 }
+
+func (s *shared) title(ref string) string { return s.titles[ref] }
 
 func (s *shared) money(micros int64) string { return money(micros, s.currency, s.usdPerEUR) }
 func (s *shared) moneyAlt(micros int64) string {
@@ -39,15 +44,28 @@ func (s *shared) moneyAlt(micros int64) string {
 type screen interface {
 	Init() tea.Cmd
 	// Update receives every non-key message, and key messages only when the
-	// screen is active.
+	// screen is active. Mouse coordinates are relative to the body.
 	Update(msg tea.Msg) (screen, tea.Cmd)
-	// View renders the body for the given area.
-	View(width, height int) string
-	// Keys are the contextual bindings shown in the footer.
-	Keys() help.KeyMap
+	// SetSize gives the screen its body area. The root calls it whenever the
+	// window or the surrounding chrome changes.
+	SetSize(width, height int)
+	// View renders the body at the last size set.
+	View() string
+	// Hints are the few bindings shown in the footer, most useful first.
+	Hints() []key.Binding
+	// Help lists every binding of the screen, grouped, for the ? overlay.
+	Help() []helpGroup
 	// Capturing is true while a text input has focus, so global shortcuts
 	// (q, 1-4, ?) are passed through to the screen.
 	Capturing() bool
+}
+
+// badged screens show a counter next to their tab.
+type badged interface{ Badge() int }
+
+type helpGroup struct {
+	title string
+	keys  []key.Binding
 }
 
 // ---------------------------------------------------------------- messages

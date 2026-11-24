@@ -1,40 +1,40 @@
- ◆ forge   1 Tareas   2 En vivo   3 Bandeja   4 Informes                                            ● daemon  ·  @aruiz 
- Informes   repositorio  tarea  persona  modelo  harness  día                                                           
- periodo últimos 7 días  ·  moneda EUR                                                                                  
- ╭──────────────────────────╮ ╭──────────────────────────╮ ╭──────────────────────────╮ ╭──────────────────────────╮    
- │ total                    │ │ peticiones               │ │ tokens                   │ │ sin precio               │    
- │ 10.16 €                  │ │ 184                      │ │ 8.0M                     │ │ 0                        │    
- ╰──────────────────────────╯ ╰──────────────────────────╯ ╰──────────────────────────╯ ╰──────────────────────────╯    
- repositorio                                                                                  coste      % peticiones   
- ❯ api                           ████████████████████████████████████████████████████████      4.38 €    43%         77 
-   web                           █████████████████████████████████▋                            2.64 €    26%         46 
-   infra                         █████████████████████▍                                        1.68 €    17%         42 
-   personal / otros              ██████████████████▋                                           1.47 €    14%         19 
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
+ forge   Tareas  En vivo  Bandeja 29  Informes                                                        ● al día   @aruiz 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- g/G agrupar • p periodo • c USD/EUR • e exportar CSV • P periodo a medida • ? ayuda • q salir
+  Coste por repositorio · tarea · persona · modelo · herramienta · día
+  Periodo   7 días · 30 días · este mes · mes pasado                                                         EUR · USD
+  
+  10.16 €  en total  ·  184 peticiones  ·  8.0M tokens  ·  9 oct – 15 oct
+  
+    repositorio                                                                                    coste     %    pet.
+  ▌ api                   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━      4.38 €   43%      77
+    web                   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━      2.64 €   26%      46
+    infra                 ━━━━━━━━━━━━━━━━━━━━━━━━━╸━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━      1.68 €   17%      42
+    sin repositorio       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━      1.47 €   14%      19
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+ enter ver sus tareas   g agrupar por   p periodo   e exportar CSV                                    ? ayuda   q salir 

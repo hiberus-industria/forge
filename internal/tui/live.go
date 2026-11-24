@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -17,14 +16,7 @@ import (
 	"github.com/hiberus-industria/forge/internal/domain"
 )
 
-type liveKeys struct{ Up, Down, Reconnect key.Binding }
-
-func (k liveKeys) ShortHelp() []key.Binding  { return []key.Binding{k.Up, k.Down, k.Reconnect} }
-func (k liveKeys) FullHelp() [][]key.Binding { return [][]key.Binding{k.ShortHelp()} }
-
-var liveKeyMap = liveKeys{
-	Up:        key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "subir")),
-	Down:      key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "bajar")),
+var liveKeys = struct{ Reconnect key.Binding }{
 	Reconnect: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reconectar")),
 }
 
@@ -66,22 +58,51 @@ type liveScreen struct {
 	connected bool
 	backoff   time.Duration
 	connErr   error
-	scroll    int
+
+	feed          rowList[localapi.LiveEvent]
+	width, height int
 
 	// Animated session cost (micros).
 	spring    harmonica.Spring
 	shown     float64
 	vel       float64
 	animating bool
-	flash     time.Time // last event arrival, for the pulse
 }
 
 func newLiveScreen(sh *shared) *liveScreen {
-	return &liveScreen{sh: sh, spring: harmonica.NewSpring(harmonica.FPS(60), 7.0, 0.9), backoff: time.Second}
+	return &liveScreen{
+		sh: sh, spring: harmonica.NewSpring(harmonica.FPS(60), 7.0, 0.9), backoff: time.Second,
+		feed: newRowList(sh.st, func(e localapi.LiveEvent) string { return e.Model }),
+	}
 }
 
-func (m *liveScreen) Keys() help.KeyMap { return liveKeyMap }
-func (m *liveScreen) Capturing() bool   { return false }
+// liveChrome is the height above the feed: toolbar, gap, attribution (2),
+// session, gap, chart (3), gap, column titles.
+const liveChrome = 11
+
+func (m *liveScreen) SetSize(w, h int) {
+	m.width, m.height = w, h
+	m.feed.SetHeight(h - liveChrome)
+}
+
+// syncFeed refreshes the feed items from the events.
+func (m *liveScreen) syncFeed() { m.feed.SetItems(m.events, nil) }
+
+func (m *liveScreen) Hints() []key.Binding {
+	if !m.connected {
+		return []key.Binding{liveKeys.Reconnect, navKeys.UpDown}
+	}
+	return []key.Binding{navKeys.UpDown}
+}
+
+func (m *liveScreen) Help() []helpGroup {
+	return []helpGroup{
+		{"Moverse", []key.Binding{navKeys.Up, navKeys.Down, navKeys.PgUp, navKeys.PgDown, navKeys.Home}},
+		{"Conexión", []key.Binding{liveKeys.Reconnect}},
+	}
+}
+
+func (m *liveScreen) Capturing() bool { return false }
 
 func (m *liveScreen) Init() tea.Cmd { return tea.Batch(m.loadRecent(), m.connect()) }
 
@@ -190,6 +211,7 @@ func (m *liveScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
 			}
 			c, _, _ := m.sessionTotals()
 			m.shown = float64(c)
+			m.syncFeed()
 		}
 	case liveConnectedMsg:
 		if msg.gen != m.gen {
@@ -205,10 +227,12 @@ func (m *liveScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
 		if len(m.events) > liveCap {
 			m.events = m.events[:liveCap]
 		}
-		if m.scroll > 0 {
-			m.scroll++ // keep the viewport stable while reading older entries
+		// Keep the selected row while reading older entries.
+		cur := m.feed.Cursor()
+		m.syncFeed()
+		if cur > 0 {
+			m.feed.Move(1)
 		}
-		m.flash = m.sh.now()
 		// A new session resets the counter animation from zero.
 		if len(m.events) > 1 && m.events[1].SessionID != msg.ev.SessionID {
 			m.shown, m.vel = 0, 0
@@ -238,156 +262,152 @@ func (m *liveScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
 		}
 		return m, animTick()
 	case tea.MouseWheelMsg:
-		switch msg.Button {
-		case tea.MouseWheelUp:
-			m.scroll = max(0, m.scroll-1)
-		case tea.MouseWheelDown:
-			m.scroll = min(max(0, len(m.events)-1), m.scroll+1)
-		}
+		m.feed.Wheel(msg)
+	case tea.MouseClickMsg:
+		m.feed.Click(msg.Y - liveChrome)
 	case tea.KeyPressMsg:
-		switch {
-		case key.Matches(msg, liveKeyMap.Up):
-			m.scroll = max(0, m.scroll-1)
-		case key.Matches(msg, liveKeyMap.Down):
-			m.scroll = min(max(0, len(m.events)-1), m.scroll+1)
-		case key.Matches(msg, liveKeyMap.Reconnect):
+		if key.Matches(msg, liveKeys.Reconnect) {
 			m.connected = false
 			return m, tea.Batch(m.connect(), toast(toastInfo, "Reconectando con el daemon…"))
 		}
+		m.feed.Nav(msg)
 	}
 	return m, nil
 }
 
 // ---------------------------------------------------------------- view
 
-func (m *liveScreen) View(width, height int) string {
+var sourceLabels = map[domain.AttributionSource]string{
+	domain.SourceBranch:     "según la rama",
+	domain.SourceManual:     "fijada a mano",
+	domain.SourceReassigned: "reasignada",
+	domain.SourceNone:       "sin tarea: irá a la bandeja",
+}
+
+func (m *liveScreen) View() string {
 	s := m.sh.st
+	width, height := m.width, m.height
 	if len(m.events) == 0 {
 		return m.emptyView(width, height)
 	}
 
-	// Attribution card: the override wins, else the latest event.
+	// Toolbar: connection on the left, today's total on the right.
+	conn := s.Dot(s.Success, "En directo")
+	if !m.connected {
+		conn = s.Dot(s.Warning, "Sin conexión, reintentando…")
+	}
 	last := m.events[0]
+	conn += s.Faint.Render("  ·  " + harnessName(string(last.Harness)))
+	toolbar := spread(conn, s.Faint.Render("Hoy  ")+s.Bold.Render(m.sh.money(int64(m.todayTotal()))), width)
+
+	// Attribution: the pinned task wins, else the latest event.
 	attr := last.Attribution
 	src := attr.Source
 	if st := m.sh.status; st != nil && st.Override != nil {
 		ov := st.Override.Issue
-		attr = domain.Attribution{Bucket: domain.BucketIssue, Source: domain.SourceManual, Repo: &ov.Repo, Issue: &ov}
+		attr = domain.Attribution{Bucket: domain.BucketIssue, Source: domain.SourceManual, Repo: &ov.Repo, Issue: &ov, Branch: attr.Branch}
 		src = domain.SourceManual
 	}
-	gap := 1
-	cardW := (width - 2*gap) / 3
+	const labelW = 13
+	label := func(t string) string { return s.Faint.Render(pad(t, labelW)) }
 	var target string
 	switch attr.Bucket {
 	case domain.BucketIssue:
-		target = s.GradientText(fmt.Sprintf("%s#%d", shortRepo(attr.Issue.Repo.String(), m.sh.org), attr.Issue.Number), true)
+		ref := fmt.Sprintf("%s#%d", shortRepo(attr.Issue.Repo.String(), m.sh.org), attr.Issue.Number)
+		target = s.Hi.Render(ref)
+		if t := m.sh.title(attr.Issue.String()); t != "" {
+			target += "  " + s.Base.Render(t)
+		}
 	case domain.BucketRepo:
-		target = lipgloss.NewStyle().Foreground(s.Warning).Bold(true).Render(shortRepo(attr.Repo.String(), m.sh.org)) + s.Faint.Render(" · sin tarea")
+		target = s.Warn.Render(shortRepo(attr.Repo.String(), m.sh.org) + " · sin tarea")
 	default:
-		target = lipgloss.NewStyle().Foreground(s.Warning).Bold(true).Render("personal / otros")
+		target = s.Warn.Render("Fuera de un repositorio")
 	}
-	srcLabel := map[domain.AttributionSource]string{
-		domain.SourceBranch: "por rama", domain.SourceManual: "manual", domain.SourceReassigned: "reasignado", domain.SourceNone: "sin asignar",
-	}[src]
-	attrBody := s.Faint.Render("imputando a") + "\n" + target + "\n"
+	why := sourceLabels[src]
 	if attr.Branch != "" {
-		attrBody += s.Faint.Render("⎇ ") + s.Base.Render(trunc(attr.Branch, cardW-6)) + "\n"
-	} else {
-		attrBody += "\n"
+		why = "rama " + attr.Branch + " · " + why
 	}
-	dot := s.Warning
-	if attr.Bucket == domain.BucketIssue {
-		dot = s.Success
-	}
-	attrBody += s.Chip(dot, srcLabel)
+	who := label("Imputando a") + trunc(target, width-labelW) + "\n" +
+		pad("", labelW) + s.Faint.Render(trunc(why, width-labelW))
 
 	cost, toks, n := m.sessionTotals()
-	pulse := s.Primary
-	if m.sh.now().Sub(m.flash) < 700*time.Millisecond {
-		pulse = s.Accent
-	}
-	counter := lipgloss.NewStyle().Foreground(pulse).Bold(true).Render(m.sh.money(int64(m.shown)))
-	costBody := s.Faint.Render("sesión actual") + "\n" + counter
+	counter := s.Bold.Render(m.sh.money(int64(m.shown)))
 	if alt := m.sh.moneyAlt(int64(cost)); alt != "" {
-		costBody += s.Faint.Render("  ≈ " + alt)
+		counter += s.Faint.Render("  ≈ " + alt)
 	}
-	costBody += "\n" + s.Faint.Render(fmt.Sprintf("%d peticiones · %s tokens", n, humanTokens(toks.Total()))) + "\n" +
-		s.Faint.Render("hoy ") + s.Bold.Render(m.sh.money(int64(m.todayTotal())))
+	session := label("Esta sesión") + counter + s.Faint.Render("   "+plural(n, "petición", "peticiones")+" · "+humanTokens(toks.Total())+" tokens")
 
-	attrCard := s.Card.Width(cardW).Height(6).Render(attrBody)
-	costCard := s.Card.Width(cardW).Height(6).Render(costBody)
-	tokCard := s.Card.Width(width - 2*cardW - 2*gap).Height(6).Render(
-		strings.TrimRight(tokenBarsDomain(m.sh, toks, width-2*cardW-2*gap-4), "\n"))
-	top := lipgloss.JoinHorizontal(lipgloss.Top, attrCard, strings.Repeat(" ", gap), costCard, strings.Repeat(" ", gap), tokCard)
-
-	// Sparkline of cost per minute.
+	// Cost per minute with its time axis.
 	vals := m.perMinute()
-	sparkW := width - 26
-	stretched := stretch(vals, sparkW)
-	spark := s.Faint.Render(pad("últimos 30 min", 16)) + sparkline(stretched, s.Primary) + " " + s.Faint.Render("coste/min")
+	peak := 0.0
+	for _, v := range vals {
+		peak = max(peak, v)
+	}
+	chartTitle := spread(s.Section.Render("Coste por minuto"), s.Dim.Render("máx "+m.sh.money(int64(peak))), width)
+	chart := sparkline(stretch(vals, width), s.Primary, s.Border)
+	axis := spread(s.Dim.Render(fmt.Sprintf("hace %d min", sparkMinutes)), s.Dim.Render("ahora"), width)
 
-	// Feed.
-	feedH := height - lipgloss.Height(top) - 4
-	header := s.Faint.Render(pad("hora", 9) + "  " + pad("modelo", 20) + pad("tokens", 16) + padLeft("coste", 10) + "  " + "tarea")
-	var feed []string
-	start := min(m.scroll, max(0, len(m.events)-1))
-	for i := start; i < len(m.events) && len(feed) < feedH; i++ {
-		feed = append(feed, m.feedLine(m.events[i], width))
-	}
-	conn := s.Chip(s.Success, "en directo")
-	if !m.connected {
-		conn = s.Chip(s.Warning, "reconectando…")
-	}
-	title := spread(s.Title.Render("Actividad"), conn, width)
-	return top + "\n" + spark + "\n" + title + "\n" + header + "\n" + strings.Join(feed, "\n")
+	return strings.Join([]string{toolbar, "", who, session, "", chartTitle, chart, axis, "",
+		headerRow(s, width, m.feedCols(nil, false, width)...), m.feedView(width)}, "\n")
 }
 
-func (m *liveScreen) feedLine(e localapi.LiveEvent, width int) string {
+func (m *liveScreen) feedCols(e *localapi.LiveEvent, sel bool, width int) []col {
+	modelW := 14
+	if width < 70 {
+		modelW = 10
+	}
+	if e == nil {
+		return []col{{text: "hora", w: 8}, {text: "modelo", w: modelW}, {text: "entrada", w: 8, right: true},
+			{text: "salida", w: 7, right: true}, {text: "coste", w: 9, right: true}, {text: "", w: 1}, {text: "tarea"}}
+	}
 	s := m.sh.st
-	t := s.Faint.Render(e.OccurredAt.Local().Format("15:04:05"))
-	model := harnessIcon(s, string(e.Harness)) + " " + pad(shortModel(e.Model), 18)
-	tok := pad(fmt.Sprintf("%s→%s", humanTokens(e.Tokens.Input+e.Tokens.CacheRead+e.Tokens.CacheWrite), humanTokens(e.Tokens.Output+e.Tokens.Reasoning)), 16)
-	cost := padLeft(s.Bold.Render(m.sh.money(int64(e.CostMicros))), 10)
 	var where string
+	whereSt := s.Base
 	switch e.Attribution.Bucket {
 	case domain.BucketIssue:
-		where = lipgloss.NewStyle().Foreground(s.Secondary).Render(fmt.Sprintf("%s#%d", shortRepo(e.Attribution.Issue.Repo.String(), m.sh.org), e.Attribution.Issue.Number))
+		where = fmt.Sprintf("%s#%d", shortRepo(e.Attribution.Issue.Repo.String(), m.sh.org), e.Attribution.Issue.Number)
 	case domain.BucketRepo:
-		where = lipgloss.NewStyle().Foreground(s.Warning).Render(shortRepo(e.Attribution.Repo.String(), m.sh.org) + " · bandeja")
+		where, whereSt = shortRepo(e.Attribution.Repo.String(), m.sh.org)+" · bandeja", s.Warn
 	default:
-		where = lipgloss.NewStyle().Foreground(s.Warning).Render("personal · bandeja")
+		where, whereSt = "bandeja", s.Warn
 	}
-	sync := lipgloss.NewStyle().Foreground(s.Success).Render("✓")
+	sync, syncSt := " ", s.Dim
 	if !e.Synced {
-		sync = lipgloss.NewStyle().Foreground(s.Warning).Render("⧗")
+		sync, syncSt = "⧗", s.Warn
 	}
-	line := t + "  " + model + tok + cost + "  " + sync + " " + where
-	return trunc(line, width)
+	return []col{
+		{text: e.OccurredAt.Local().Format("15:04:05"), w: 8, st: s.Faint},
+		{text: shortModel(e.Model), w: modelW, st: s.Base},
+		{text: humanTokens(e.Tokens.Input + e.Tokens.CacheRead + e.Tokens.CacheWrite), w: 8, right: true, st: s.Faint},
+		{text: humanTokens(e.Tokens.Output + e.Tokens.Reasoning), w: 7, right: true, st: s.Faint},
+		{text: m.sh.money(int64(e.CostMicros)), w: 9, right: true, st: s.Base},
+		{text: sync, w: 1, st: syncSt},
+		{text: where, st: whereSt},
+	}
+}
+
+func (m *liveScreen) feedView(width int) string {
+	return m.feed.View(width, func(e localapi.LiveEvent, sel bool, w int) string {
+		return row(m.sh.st, w, sel, m.feedCols(&e, sel, w)...)
+	})
 }
 
 func (m *liveScreen) emptyView(width, height int) string {
 	s := m.sh.st
-	pulse := []string{"◜", "◝", "◞", "◟"}[int(m.sh.now().UnixMilli()/250)%4]
-	var b strings.Builder
-	b.WriteString(s.GradientText("Aún no hay actividad", true) + "\n\n")
+	status := s.Dot(s.Success, "Escuchando a Claude Code y OpenCode")
 	if !m.connected && m.connErr != nil {
-		b.WriteString(lipgloss.NewStyle().Foreground(s.Warning).Render(pulse+" sin conexión con el daemon") + "\n\n")
-	} else {
-		b.WriteString(s.Faint.Render(pulse+" escuchando a Claude Code y OpenCode…") + "\n\n")
+		status = s.Dot(s.Warning, "Sin conexión con el daemon")
 	}
-	steps := []string{
-		s.Key.Render("forge setup") + s.Faint.Render("   conecta tus harnesses (muestra el diff antes)"),
-		s.Key.Render("forge doctor") + s.Faint.Render("  comprueba que la captura funciona"),
-		s.Key.Render("forge start 123") + s.Faint.Render(" crea la rama feat/123-… y empieza a imputar"),
-	}
-	b.WriteString(strings.Join(steps, "\n"))
-	b.WriteString("\n\n" + s.Faint.Render("Cada petición aparecerá aquí al instante, con su coste y su tarea."))
-	return center(b.String(), width, height)
-}
-
-// tokenBarsDomain adapts domain tokens to the shared token bars.
-func tokenBarsDomain(sh *shared, t domain.Tokens, width int) string {
-	return tokenBars(sh, apiTokens(t), width)
+	steps := lipgloss.JoinVertical(lipgloss.Left,
+		s.Key.Render(pad("forge setup", 18))+s.Faint.Render("conecta Claude Code y OpenCode"),
+		s.Key.Render(pad("forge doctor", 18))+s.Faint.Render("comprueba que todo funciona"),
+		s.Key.Render(pad("forge start 123", 18))+s.Faint.Render("empieza el issue 123 en su rama"),
+	)
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		s.Bold.Render("Todavía no hay actividad"), status, "",
+		s.Faint.Render("Cada petición a la IA aparecerá aquí al momento, con su coste y su tarea."), "",
+		s.Section.Render("¿Primera vez?"), steps)
+	return center(content, width, height)
 }
 
 // stretch resamples values to n buckets (nearest neighbour).

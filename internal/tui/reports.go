@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -19,24 +18,16 @@ import (
 	"github.com/hiberus-industria/forge/internal/domain"
 )
 
-type reportKeys struct{ Group, Period, Custom, Currency, Export, Up, Down, Refresh key.Binding }
-
-func (k reportKeys) ShortHelp() []key.Binding {
-	return []key.Binding{k.Group, k.Period, k.Currency, k.Export, k.Custom}
-}
-
-func (k reportKeys) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Group, k.Period, k.Custom}, {k.Currency, k.Export, k.Refresh}, {k.Up, k.Down}}
-}
-
-var reportKeyMap = reportKeys{
-	Group:    key.NewBinding(key.WithKeys("g"), key.WithHelp("g/G", "agrupar")),
+var reportKeys = struct {
+	Group, Period, Custom, Currency, Export, Drill, Back, Refresh key.Binding
+}{
+	Group:    key.NewBinding(key.WithKeys("g", "G"), key.WithHelp("g", "agrupar por")),
 	Period:   key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "periodo")),
-	Custom:   key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "periodo a medida")),
-	Currency: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "USD/EUR")),
+	Custom:   key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "elegir fechas")),
+	Currency: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "euros / dólares")),
 	Export:   key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "exportar CSV")),
-	Up:       key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "subir")),
-	Down:     key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "bajar")),
+	Drill:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "ver sus tareas")),
+	Back:     key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "volver")),
 	Refresh:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "recargar")),
 }
 
@@ -48,7 +39,7 @@ var groupBys = []struct {
 	{api.GroupByIssue, "tarea"},
 	{api.GroupByUser, "persona"},
 	{api.GroupByModel, "modelo"},
-	{api.GroupByHarness, "harness"},
+	{api.GroupByHarness, "herramienta"},
 	{api.GroupByDay, "día"},
 }
 
@@ -64,10 +55,10 @@ func presetPeriods(now time.Time) []period {
 	tomorrow := day.AddDate(0, 0, 1)
 	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	return []period{
-		{"últimos 7 días", day.AddDate(0, 0, -6), tomorrow},
-		{"últimos 30 días", day.AddDate(0, 0, -29), tomorrow},
+		{"7 días", day.AddDate(0, 0, -6), tomorrow},
+		{"30 días", day.AddDate(0, 0, -29), tomorrow},
 		{"este mes", month, month.AddDate(0, 1, 0)},
-		{"mes anterior", month.AddDate(0, -1, 0), month},
+		{"mes pasado", month.AddDate(0, -1, 0), month},
 	}
 }
 
@@ -88,7 +79,7 @@ func parseCustomPeriod(s string, loc *time.Location) (period, error) {
 	if to.Before(from) {
 		return period{}, fmt.Errorf("la fecha final es anterior a la inicial")
 	}
-	return period{label: a + " → " + b, from: from, to: to.AddDate(0, 0, 1)}, nil
+	return period{label: "a medida", from: from, to: to.AddDate(0, 0, 1)}, nil
 }
 
 type reportLoadedMsg struct {
@@ -105,20 +96,71 @@ type reportsScreen struct {
 	period   int // index in presets; -1 = custom
 	custom   period
 	currency domain.Currency
-	report   *api.CostReport
-	loading  bool
-	err      error
-	seq      int
-	cursor   int
+	// repo narrows the report to one repository (drill-down from a repo
+	// row); empty = everything.
+	repo      string
+	prevGroup int
+	report    *api.CostReport
+	loading   bool
+	err       error
+	seq       int
+
+	list          rowList[api.CostRow]
+	width, height int
 }
 
 func newReportsScreen(sh *shared) *reportsScreen {
-	return &reportsScreen{sh: sh, currency: sh.currency, loading: true}
+	return &reportsScreen{sh: sh, currency: sh.currency, loading: true,
+		list: newRowList(sh.st, func(r api.CostRow) string { return r.Label })}
 }
 
-func (m *reportsScreen) Keys() help.KeyMap { return reportKeyMap }
-func (m *reportsScreen) Capturing() bool   { return false }
-func (m *reportsScreen) Init() tea.Cmd     { return m.load() }
+func (m *reportsScreen) canDrill() bool {
+	return m.repo == "" && groupBys[m.group].g == api.GroupByRepo
+}
+
+func (m *reportsScreen) Hints() []key.Binding {
+	hs := []key.Binding{reportKeys.Group, reportKeys.Period}
+	if m.canDrill() {
+		hs = append([]key.Binding{reportKeys.Drill}, hs...)
+	}
+	if m.repo != "" {
+		hs = append([]key.Binding{reportKeys.Back}, hs...)
+	}
+	return append(hs, reportKeys.Export)
+}
+
+func (m *reportsScreen) Help() []helpGroup {
+	return []helpGroup{
+		{"Moverse", []key.Binding{navKeys.Up, navKeys.Down, navKeys.PgUp, navKeys.PgDown, reportKeys.Drill, reportKeys.Back}},
+		{"Informe", []key.Binding{reportKeys.Group, reportKeys.Period, reportKeys.Custom, reportKeys.Currency}},
+		{"Datos", []key.Binding{reportKeys.Export, reportKeys.Refresh}},
+	}
+}
+
+func (m *reportsScreen) Capturing() bool { return false }
+func (m *reportsScreen) Init() tea.Cmd   { return m.load() }
+
+// Body rows above the list: two selectors, gap, totals, gap, column titles.
+const reportChrome = 6
+
+func (m *reportsScreen) SetSize(w, h int) {
+	m.width, m.height = w, h
+	m.list.SetHeight(h - reportChrome - m.footerHeight())
+}
+
+func (m *reportsScreen) unpriced() int {
+	if m.report == nil || m.report.UnpricedEvents == nil {
+		return 0
+	}
+	return *m.report.UnpricedEvents
+}
+
+func (m *reportsScreen) footerHeight() int {
+	if m.unpriced() > 0 {
+		return 2
+	}
+	return 0
+}
 
 func (m *reportsScreen) currentPeriod() period {
 	if m.period < 0 {
@@ -131,7 +173,12 @@ func (m *reportsScreen) params() api.GetCostReportParams {
 	p := m.currentPeriod()
 	cur := api.Currency(m.currency)
 	from, to := p.from, p.to
-	return api.GetCostReportParams{GroupBy: groupBys[m.group].g, Currency: &cur, From: &from, To: &to}
+	r := api.GetCostReportParams{GroupBy: groupBys[m.group].g, Currency: &cur, From: &from, To: &to}
+	if m.repo != "" {
+		repo := m.repo
+		r.Repo = &repo
+	}
+	return r
 }
 
 func (m *reportsScreen) load() tea.Cmd {
@@ -185,7 +232,8 @@ func (m *reportsScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
 		if msg.err == nil {
 			r := msg.r
 			m.report = &r
-			m.cursor = min(m.cursor, max(0, len(r.Rows)-1))
+			m.list.SetItems(r.Rows, func(c api.CostRow) string { return c.Key })
+			m.list.SetHeight(m.height - reportChrome - m.footerHeight())
 		}
 	case customPeriodMsg:
 		m.period, m.custom = -1, msg.p
@@ -193,43 +241,38 @@ func (m *reportsScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
 	case refreshMsg:
 		return m, m.load()
 	case tea.MouseWheelMsg:
-		if m.report != nil {
-			switch msg.Button {
-			case tea.MouseWheelUp:
-				m.cursor = max(0, m.cursor-1)
-			case tea.MouseWheelDown:
-				m.cursor = min(max(0, len(m.report.Rows)-1), m.cursor+1)
-			}
-		}
+		m.list.Wheel(msg)
+	case tea.MouseClickMsg:
+		m.list.Click(msg.Y - reportChrome)
 	case tea.KeyPressMsg:
 		switch {
-		case key.Matches(msg, reportKeyMap.Group):
-			m.group = (m.group + 1) % len(groupBys)
-			m.cursor = 0
+		case key.Matches(msg, reportKeys.Group):
+			d := 1
+			if msg.String() == "G" {
+				d = len(groupBys) - 1
+			}
+			m.group = (m.group + d) % len(groupBys)
+			m.list.Top()
 			return m, m.load()
-		case msg.String() == "G":
-			m.group = (m.group - 1 + len(groupBys)) % len(groupBys)
-			m.cursor = 0
-			return m, m.load()
-		case key.Matches(msg, reportKeyMap.Period):
+		case key.Matches(msg, reportKeys.Period):
 			m.period = (m.period + 1) % len(presetPeriods(m.sh.now()))
 			return m, m.load()
-		case key.Matches(msg, reportKeyMap.Custom):
+		case key.Matches(msg, reportKeys.Custom):
 			loc := m.sh.now().Location()
-			return m, openModal(newInputModal(m.sh.st, "Periodo a medida", "Fechas inclusivas, en tu zona horaria.", "2026-09-01..2026-09-30",
+			return m, openModal(newInputModal(m.sh.st, "Elegir fechas", "Desde y hasta, ambos incluidos, separados por dos puntos (..).", "2026-09-01..2026-09-30",
 				func(v string) error { _, err := parseCustomPeriod(v, loc); return err },
 				func(v string) tea.Cmd {
 					p, _ := parseCustomPeriod(v, loc)
 					return func() tea.Msg { return customPeriodMsg{p} }
 				}))
-		case key.Matches(msg, reportKeyMap.Currency):
+		case key.Matches(msg, reportKeys.Currency):
 			if m.currency == domain.CurrencyEUR {
 				m.currency = domain.CurrencyUSD
 			} else {
 				m.currency = domain.CurrencyEUR
 			}
 			return m, m.load()
-		case key.Matches(msg, reportKeyMap.Export):
+		case key.Matches(msg, reportKeys.Export):
 			if m.report == nil {
 				return m, nil
 			}
@@ -237,16 +280,26 @@ func (m *reportsScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
 			if err != nil {
 				return m, toast(toastErr, "No se pudo exportar: "+err.Error())
 			}
-			return m, toast(toastOK, "CSV exportado → "+path)
-		case key.Matches(msg, reportKeyMap.Refresh):
-			return m, m.load()
-		case key.Matches(msg, reportKeyMap.Up):
-			m.cursor = max(0, m.cursor-1)
-		case key.Matches(msg, reportKeyMap.Down):
-			if m.report != nil {
-				m.cursor = min(max(0, len(m.report.Rows)-1), m.cursor+1)
+			return m, toast(toastOK, "CSV guardado en "+path)
+		case key.Matches(msg, reportKeys.Drill):
+			r, ok := m.list.Selected()
+			if !ok || !m.canDrill() || r.Key == "-" || r.Key == "" {
+				return m, nil
 			}
+			m.repo, m.prevGroup = r.Key, m.group
+			m.group = 1 // tarea
+			m.list.Top()
+			return m, m.load()
+		case key.Matches(msg, reportKeys.Back):
+			if m.repo == "" {
+				return m, nil
+			}
+			m.repo, m.group = "", m.prevGroup
+			return m, m.load()
+		case key.Matches(msg, reportKeys.Refresh):
+			return m, m.load()
 		}
+		m.list.Nav(msg)
 	}
 	return m, nil
 }
@@ -255,112 +308,138 @@ func (m *reportsScreen) fmtCost(v float64) string {
 	return domain.FormatAmount(v, domain.Currency(m.currency))
 }
 
-func (m *reportsScreen) View(width, height int) string {
-	s := m.sh.st
-	// Selector line: segmented controls.
-	seg := func(opts []string, active int) string {
-		parts := make([]string, len(opts))
-		for i, o := range opts {
-			if i == active {
-				parts[i] = s.TabOn.Render(o)
-			} else {
-				parts[i] = s.TabOff.Render(o)
-			}
+// rowLabel names a report row for humans.
+func (m *reportsScreen) rowLabel(r api.CostRow) string {
+	switch m.report.GroupBy {
+	case api.GroupByRepo:
+		if r.Key == "-" {
+			return "sin repositorio"
 		}
-		return strings.Join(parts, "")
+		return shortRepo(r.Label, m.sh.org)
+	case api.GroupByModel:
+		return shortModel(r.Label)
+	case api.GroupByIssue:
+		if r.Key == "-" {
+			return "sin tarea (bandeja)"
+		}
+		ref := r.Label
+		if repo, n, ok := strings.Cut(r.Label, "#"); ok {
+			ref = shortRepo(repo, m.sh.org) + "#" + n
+		}
+		if t := m.sh.title(r.Key); t != "" {
+			return ref + "  " + t
+		}
+		return ref
+	case api.GroupByDay:
+		if d, err := time.Parse("2006-01-02", r.Key); err == nil {
+			return shortDate(d)
+		}
 	}
-	gl := make([]string, len(groupBys))
+	return r.Label
+}
+
+func (m *reportsScreen) View() string {
+	s := m.sh.st
+	width, height := m.width, m.height
+	const labelW = 10
+
+	groups := make([]string, len(groupBys))
 	for i, g := range groupBys {
-		gl[i] = g.label
+		groups[i] = g.label
 	}
-	per := m.currentPeriod()
-	head := s.Title.Render("Informes") + "  " + seg(gl, m.group)
-	sub := s.Faint.Render("periodo ") + s.Bold.Render(per.label) + s.Faint.Render("  ·  moneda ") + s.Bold.Render(string(m.currency))
-	bodyH := height - 3
+	line1 := s.Faint.Render(pad("Coste por", labelW)) + segmented(s, groups, m.group)
+	if m.repo != "" {
+		line1 = s.Faint.Render(pad("Coste por", labelW)) + s.Hi.Render(groupBys[m.group].label) +
+			s.Faint.Render(" en ") + s.Bold.Render(shortRepo(m.repo, m.sh.org)) + "   " + hint(s, "esc", "volver a todos")
+	}
+	periods := presetPeriods(m.sh.now())
+	pl := make([]string, 0, len(periods)+1)
+	for _, p := range periods {
+		pl = append(pl, p.label)
+	}
+	pi := m.period
+	if pi < 0 {
+		pl = append(pl, "a medida")
+		pi = len(pl) - 1
+	}
+	cur := 0
+	if m.currency == domain.CurrencyUSD {
+		cur = 1
+	}
+	line2 := spread(s.Faint.Render(pad("Periodo", labelW))+segmented(s, pl, pi), segmented(s, []string{"EUR", "USD"}, cur), width)
+	sel := line1 + "\n" + line2
+	bodyH := max(1, height-3)
 
 	if m.report == nil {
-		msg := s.Faint.Render("Calculando…")
 		if m.err != nil {
-			msg = lipgloss.NewStyle().Foreground(s.Danger).Render("✗ " + m.err.Error())
+			return sel + "\n\n" + emptyState(s, width, bodyH, s.Err.Render("No se pudo calcular el informe"), m.err.Error(), "Pulsa r para reintentar.")
 		}
-		return head + "\n" + sub + "\n\n" + center(msg, width, bodyH-1)
+		return sel + "\n\n" + center(s.Faint.Render("Calculando…"), width, bodyH)
 	}
 	r := m.report
 
-	// KPI cards.
 	var events int
 	var toks api.Tokens
 	for _, row := range r.Rows {
 		events += row.Events
 		toks = addTokens(toks, row.Tokens)
 	}
-	kpi := func(label, value string, c interface {
-		RGBA() (uint32, uint32, uint32, uint32)
-	},
-	) string {
-		return s.Card.Width(max(18, (width-3)/4)).Render(s.Faint.Render(label) + "\n" + lipgloss.NewStyle().Foreground(c).Bold(true).Render(value))
+	p := m.currentPeriod()
+	totals := s.Hi.Render(m.fmtCost(r.Total)) + s.Faint.Render(fmt.Sprintf("  en total  ·  %s  ·  %s tokens  ·  %s – %s",
+		plural(events, "petición", "peticiones"), humanTokens(totalTokens(toks)), dayMonth(p.from), dayMonth(p.to.AddDate(0, 0, -1))))
+	if m.loading {
+		totals += s.Dim.Render("  ·  actualizando…")
 	}
-	unpriced := 0
-	if r.UnpricedEvents != nil {
-		unpriced = *r.UnpricedEvents
-	}
-	uc := s.Success
-	if unpriced > 0 {
-		uc = s.Warning
-	}
-	cards := lipgloss.JoinHorizontal(lipgloss.Top,
-		kpi("total", m.fmtCost(r.Total), s.Primary), " ",
-		kpi("peticiones", fmt.Sprintf("%d", events), s.Secondary), " ",
-		kpi("tokens", humanTokens(totalTokens(toks)), s.Info), " ",
-		kpi("sin precio", fmt.Sprintf("%d", unpriced), uc))
-
+	head := sel + "\n\n" + trunc(totals, width) + "\n\n"
 	if len(r.Rows) == 0 {
-		return head + "\n" + sub + "\n" + cards + "\n" + center(s.Faint.Render("Sin gasto en este periodo"), width, bodyH-lipgloss.Height(cards))
+		return head + emptyState(s, width, max(1, height-reportChrome+1), "No hay gasto en este periodo", "Pulsa p para cambiar el periodo o P para elegir fechas.")
 	}
 
-	// Bar chart rows.
-	labelW := min(32, max(14, width/4))
-	valW, shareW, evW := 11, 6, 10
-	barW := max(6, width-labelW-valW-shareW-evW-6)
-	var maxCost float64
-	for _, row := range r.Rows {
-		maxCost = max(maxCost, row.Cost)
+	lw := 20
+	if r.GroupBy == api.GroupByIssue {
+		lw = min(44, width*2/5)
 	}
-	listH := bodyH - lipgloss.Height(cards) - 2
-	start, end := window(len(r.Rows), m.cursor, listH)
-	var b strings.Builder
-	b.WriteString(s.Faint.Render(pad(groupBys[m.group].label, labelW)+" "+pad("", barW)+" "+padLeft("coste", valW)+" "+padLeft("%", shareW)+" "+padLeft("peticiones", evW)) + "\n")
-	for i := start; i < end; i++ {
-		row := r.Rows[i]
-		label := row.Label
-		switch r.GroupBy {
-		case api.GroupByRepo:
-			label = shortRepo(label, m.sh.org)
-		case api.GroupByModel:
-			label = shortModel(label)
+	var top float64
+	for _, row := range r.Rows {
+		top = max(top, row.Cost)
+	}
+	cols := func(cr *api.CostRow, sel bool, w int) []col {
+		if cr == nil {
+			return []col{{text: groupBys[m.group].label, w: lw}, {text: ""}, {text: "coste", w: 10, right: true},
+				{text: "%", w: 4, right: true}, {text: "pet.", w: 6, right: true}}
 		}
 		share := 0.0
 		if r.Total > 0 {
-			share = row.Cost / r.Total * 100
+			share = cr.Cost / r.Total * 100
 		}
-		line := pad(label, labelW) + " " + pad(bar(row.Cost, maxCost, barW, s.Gradient), barW) + " " +
-			padLeft(s.Bold.Render(m.fmtCost(row.Cost)), valW) + " " + padLeft(s.Faint.Render(fmt.Sprintf("%.0f%%", share)), shareW) + " " +
-			padLeft(s.Faint.Render(fmt.Sprintf("%d", row.Events)), evW)
-		if i == m.cursor {
-			line = lipgloss.NewStyle().Foreground(s.Primary).Render("❯ ") + line
-		} else {
-			line = "  " + line
+		labelSt := s.Base
+		if sel {
+			labelSt = s.Bold
 		}
-		b.WriteString(line)
-		if i < end-1 {
-			b.WriteByte('\n')
+		barW := max(4, w-2-lw-10-4-6-colGap*4)
+		frac := 0.0
+		if top > 0 {
+			frac = cr.Cost / top
+		}
+		bar := meter(s, frac, barW, s.Primary)
+		if sel {
+			bar = lipgloss.NewStyle().Background(s.Surface).Render(bar)
+		}
+		return []col{
+			{text: m.rowLabel(*cr), w: lw, st: labelSt},
+			{text: bar, raw: true},
+			{text: m.fmtCost(cr.Cost), w: 10, right: true, st: s.Base},
+			{text: fmt.Sprintf("%.0f%%", share), w: 4, right: true, st: s.Faint},
+			{text: fmt.Sprint(cr.Events), w: 6, right: true, st: s.Faint},
 		}
 	}
-	footer := ""
-	if unpriced > 0 {
-		footer = "\n" + lipgloss.NewStyle().Foreground(s.Warning).Render(fmt.Sprintf("⚠ %d peticiones usan la estimación del harness: falta su precio en la tabla (pídelo a un admin)", unpriced))
+	out := head + headerRow(s, width, cols(nil, false, width)...) + "\n" +
+		m.list.View(width, func(cr api.CostRow, sel bool, w int) string { return row(s, w, sel, cols(&cr, sel, w)...) })
+	if n := m.unpriced(); n > 0 {
+		out = fitHeight(out, height-2) + "\n\n" + s.Warn.Render("▲ ") +
+			s.Faint.Render(trunc(fmt.Sprintf("%s sin precio conocido: su coste es la estimación del harness. Pide a un admin que añada el modelo.", plural(n, "petición", "peticiones")), width-2))
 	}
-	return head + "\n" + sub + "\n" + cards + "\n" + fitHeight(b.String(), listH+1) + footer
+	return out
 }
 
 func addTokens(a, b api.Tokens) api.Tokens {

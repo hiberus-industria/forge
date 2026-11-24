@@ -1,40 +1,40 @@
- ◆ forge   1 Tareas   2 En vivo   3 Bandeja   4 Informes                                            ● daemon  ·  @aruiz
- Tareas · mías · activas · 4                                                                               total 2.35 €
- ▍api  3 · 2.35 €                                                     ╭───────────────────────────────────────────────╮
- ❯   #100 Login OIDC con Keycloak (P…  EN CURSO       0.47 €  458.8k  │ api#100   EN CURSO                            │
-     #107 Cálculo de coste con caché…  REVISIÓN       1.89 €  559.5k  │ Login OIDC con Keycloak (PKCE + device flow)  │
-     #114 Reconciliación periódica c…  PENDIENTE      0.00 €       0  │                                               │
-                                                                      │ 0.47 €  ≈ $0.50  · 14 peticiones              │
- ▍web  1 · 0.00 €       ╭──────────────────────────────────────────────────────────────────────╮-con-keycloak-pkce-   │
-     #135 Corregir gráfi│                                                                      │                      │
-                        │  Empezar hiberus-industria/api#100                                   │                      │
-                        │                                                                      │                      │
-                        │  Login OIDC con Keycloak (PKCE + device flow)                        │                      │
-                        │                                                                      │                47.1k │
-                        │  ❯ 1 feat      feat/100-login-oidc-con-keycloak-pkce-device-flow     │                20.8k │
-                        │    2 fix       fix/100-login-oidc-con-keycloak-pkce-device-flow      │█████████████  390.8k │
-                        │    3 chore     chore/100-login-oidc-con-keycloak-pkce-device-flow    │                      │
-                        │    4 docs      docs/100-login-oidc-con-keycloak-pkce-device-flow     │                      │
-                        │    5 refactor  refactor/100-login-oidc-con-keycloak-pkce-device-fl…  │███████████    0.43 € │
-                        │    6 test      test/100-login-oidc-con-keycloak-pkce-device-flow     │               0.03 € │
-                        │    7 spike     spike/100-login-oidc-con-keycloak-pkce-device-flow    │                      │
-                        │                                                                      │                      │
-                        │  ↑/↓ elegir · enter confirmar · esc cancelar                         │███████████    0.26 € │
-                        │                                                                      │██████▍        0.20 € │
-                        ╰──────────────────────────────────────────────────────────────────────╯                      │
-                                                                      │ Por día  2026-10-12 → 2026-10-13              │
-                                                                      │ ▆█                                            │
-                                                                      ╰───────────────────────────────────────────────╯
-
-
-
-
-
-
-
-
-
-
-
+ forge   Tareas  En vivo  Bandeja 29  Informes                                                        ● al día   @aruiz
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- s empezar • p abrir PR • o/O fijar/quitar tarea activa • enter detalle • / filtrar • a mías/todas • ? ayuda • q salir
+  Mías · Equipo     Abiertas · En curso · Cerradas · Todas                                            4 tareas  2.35 €
+
+  ▌ ●  api#100  Login OIDC con Keycloak (PKCE + device…     0.47 € │  api#100   ● En curso
+    ◐  api#107  Cálculo de coste con caché de 1h            1.89 € │  Login OIDC con Keycloak (PKCE + device flow)
+    ○  api#114  Reconciliación periódica con GitHub              — │
+    ○  web#135  Corregir gráfico de barras en modo cla…          — │  0.47 €  ≈ $0.50
+                        ╭──────────────────────────────────────────────────────────────────────╮ens
+                        │                                                                      │
+                        │  ¿Qué tipo de trabajo es?                                            │c-con-keycloak-pkce-de…
+                        │  Crea la rama y mueve hiberus-industria/api#100 a En curso.          │
+                        │                                                                      │
+                        │  ▌ 1  feat      feat/100-login-oidc-con-keycloak-pkce-device-flow    │
+                        │    2  fix       fix/100-login-oidc-con-keycloak-pkce-device-flow     │
+                        │    3  chore     chore/100-login-oidc-con-keycloak-pkce-device-flow   │
+                        │    4  docs      docs/100-login-oidc-con-keycloak-pkce-device-flow    │━━━━━━━━━━━━━━━━━━━━━━━
+                        │    5  refactor  refactor/100-login-oidc-con-keycloak-pkce-device-f…  │%   ■ caché leída 85%
+                        │    6  test      test/100-login-oidc-con-keycloak-pkce-device-flow    │
+                        │    7  spike     spike/100-login-oidc-con-keycloak-pkce-device-flow   │
+                        │                                                                      │━━━━━━━━━━━━     0.43 €
+                        │  ↑↓ elegir   enter aceptar   esc cerrar                              │━━━━━━━━━━━━     0.03 €
+                        │                                                                      │
+                        ╰──────────────────────────────────────────────────────────────────────╯
+                                                                   │  @aruiz          ━━━━━━━━━━━━━━━━━━━━━━     0.26 €
+                                                                   │  @mgil           ━━━━━━━━━━━━━━━━━━━━━━     0.20 €
+                                                                   │
+                                                                   │  Por día                           12 oct → 13 oct
+                                                                   │  ▆█
+                                                                   │
+                                                                   │
+                                                                   │
+                                                                   │
+                                                                   │
+                                                                   │
+                                                                   │
+                                                                   │
+                                                                   │
+
+ enter acciones   s empezar   p abrir PR   / buscar   a mías / equipo                                 ? ayuda   q salir

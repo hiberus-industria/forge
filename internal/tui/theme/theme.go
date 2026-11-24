@@ -1,8 +1,11 @@
 // Package theme holds the TUI palette and the lipgloss styles built from it.
 //
-// The default palette is PROVISIONAL: a corporate-flavoured palette in the
-// Charm style, pending the official brand colours. Every token can be
-// overridden from a TOML file (config theme_file):
+// The palette is deliberately sober: one accent (primary) for focus and
+// selection, a neutral scale for text and chrome, and the semantic colours
+// (success, warning, danger) reserved for status. Secondary, accent and info
+// are kept for compatibility with existing theme files but the UI uses them
+// sparingly. Every token can be overridden from a TOML file (config
+// theme_file):
 //
 //	[dark]
 //	primary = "#00A19B"
@@ -35,6 +38,8 @@ type Palette struct {
 	Subtle    string `toml:"subtle"`
 	Surface   string `toml:"surface"`
 	Border    string `toml:"border"`
+	// OnPrimary is the text drawn over a primary background (active tab).
+	OnPrimary string `toml:"on_primary"`
 }
 
 // Theme has a palette for dark and for light terminals.
@@ -43,18 +48,20 @@ type Theme struct {
 	Light Palette `toml:"light"`
 }
 
-// Default returns the provisional palette.
+// Default returns the default palette.
 func Default() Theme {
 	return Theme{
 		Dark: Palette{
-			Primary: "#19C2B8", Secondary: "#8B6CFF", Accent: "#FF7A59",
-			Success: "#3DD68C", Warning: "#F5B83D", Danger: "#FF5C7A", Info: "#5AB0FF",
-			Text: "#ECEAF4", Muted: "#9591AD", Subtle: "#4A4562", Surface: "#221F30", Border: "#3A3650",
+			Primary: "#2BB8AE", Secondary: "#9A93B8", Accent: "#D9926B",
+			Success: "#62B98A", Warning: "#D6A548", Danger: "#E06C75", Info: "#7FA7D6",
+			Text: "#E2E1E6", Muted: "#8D8B97", Subtle: "#55535E", Surface: "#2A2932", Border: "#3B3A44",
+			OnPrimary: "#14131A",
 		},
 		Light: Palette{
-			Primary: "#00857D", Secondary: "#5B3FD6", Accent: "#D9512F",
-			Success: "#16935A", Warning: "#B57900", Danger: "#C8223F", Info: "#1C6FD1",
-			Text: "#1E1B2E", Muted: "#6B6880", Subtle: "#C9C5D8", Surface: "#F1EFF8", Border: "#D6D2E4",
+			Primary: "#00796F", Secondary: "#5E587A", Accent: "#A85A33",
+			Success: "#2E7D51", Warning: "#946200", Danger: "#B42335", Info: "#2F5F96",
+			Text: "#24232B", Muted: "#6E6C78", Subtle: "#A9A7B2", Surface: "#E6E5EC", Border: "#D4D3DA",
+			OnPrimary: "#FFFFFF",
 		},
 	}
 }
@@ -95,21 +102,30 @@ type Styles struct {
 	Primary, Secondary, Accent           color.Color
 	Success, Warning, Danger, Info       color.Color
 	Text, Muted, Subtle, Surface, Border color.Color
-	// Gradient is the brand gradient stops (logo, highlights, bars).
-	Gradient []color.Color
+	OnPrimary                            color.Color
 
-	Base     lipgloss.Style
-	Bold     lipgloss.Style
-	Faint    lipgloss.Style
-	Dim      lipgloss.Style
-	Title    lipgloss.Style
-	Heading  lipgloss.Style
-	Key      lipgloss.Style
-	Selected lipgloss.Style
-	Card     lipgloss.Style
-	Modal    lipgloss.Style
-	TabOn    lipgloss.Style
-	TabOff   lipgloss.Style
+	Base  lipgloss.Style // body text
+	Bold  lipgloss.Style // emphasised body text (amounts, names)
+	Faint lipgloss.Style // secondary text (labels, metadata)
+	Dim   lipgloss.Style // tertiary text (separators, placeholders)
+	// Hi is accent-coloured text, for the one thing that matters on screen.
+	Hi lipgloss.Style
+	// Section titles a block inside a panel.
+	Section lipgloss.Style
+	Key     lipgloss.Style // key hints
+	// Cursor is the gutter mark of the focused row.
+	Cursor lipgloss.Style
+	// Sel is the background of the focused row.
+	Sel lipgloss.Style
+	// Link is a clickable (OSC 8) reference.
+	Link lipgloss.Style
+	// Rule is a horizontal or vertical separator.
+	Rule  lipgloss.Style
+	Modal lipgloss.Style
+	// Tabs: the active one is a pill on the primary colour.
+	TabOn, TabOff lipgloss.Style
+	// Semantic text.
+	OK, Warn, Err lipgloss.Style
 }
 
 // Styles builds the styles for a dark or light background.
@@ -124,72 +140,29 @@ func (t Theme) Styles(isDark bool) *Styles {
 		Primary: c(p.Primary), Secondary: c(p.Secondary), Accent: c(p.Accent),
 		Success: c(p.Success), Warning: c(p.Warning), Danger: c(p.Danger), Info: c(p.Info),
 		Text: c(p.Text), Muted: c(p.Muted), Subtle: c(p.Subtle), Surface: c(p.Surface), Border: c(p.Border),
+		OnPrimary: c(p.OnPrimary),
 	}
-	s.Gradient = []color.Color{s.Primary, s.Secondary, s.Accent}
 	s.Base = lipgloss.NewStyle().Foreground(s.Text)
 	s.Bold = s.Base.Bold(true)
 	s.Faint = lipgloss.NewStyle().Foreground(s.Muted)
 	s.Dim = lipgloss.NewStyle().Foreground(s.Subtle)
-	s.Title = lipgloss.NewStyle().Foreground(s.Primary).Bold(true)
-	s.Heading = lipgloss.NewStyle().Foreground(s.Secondary).Bold(true)
-	s.Key = lipgloss.NewStyle().Foreground(s.Primary).Bold(true)
-	s.Selected = lipgloss.NewStyle().Background(s.Surface).Foreground(s.Text).Bold(true)
-	s.Card = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(s.Border).Padding(0, 1)
-	s.Modal = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(s.Secondary).Padding(1, 2)
-	s.TabOn = lipgloss.NewStyle().Foreground(s.Surface).Background(s.Primary).Bold(true).Padding(0, 1)
+	s.Hi = lipgloss.NewStyle().Foreground(s.Primary).Bold(true)
+	s.Section = s.Faint.Bold(true)
+	s.Key = s.Base.Bold(true)
+	s.Cursor = lipgloss.NewStyle().Foreground(s.Primary)
+	s.Sel = lipgloss.NewStyle().Background(s.Surface)
+	s.Link = s.Base.Underline(true)
+	s.Rule = lipgloss.NewStyle().Foreground(s.Border)
+	s.Modal = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(s.Border).Padding(1, 2)
+	s.TabOn = lipgloss.NewStyle().Foreground(s.OnPrimary).Background(s.Primary).Bold(true).Padding(0, 1)
 	s.TabOff = lipgloss.NewStyle().Foreground(s.Muted).Padding(0, 1)
+	s.OK = lipgloss.NewStyle().Foreground(s.Success)
+	s.Warn = lipgloss.NewStyle().Foreground(s.Warning)
+	s.Err = lipgloss.NewStyle().Foreground(s.Danger)
 	return s
 }
 
-// Pill renders a rounded-looking badge with the given colour.
-func (s *Styles) Pill(text string, bg color.Color) string {
-	fg := lipgloss.Color("#FFFFFF")
-	if s.IsDark {
-		fg = lipgloss.Color("#14121C")
-	}
-	return lipgloss.NewStyle().Background(bg).Foreground(fg).Bold(true).Padding(0, 1).Render(text)
-}
-
-// Chip renders a subtle label: coloured dot plus text.
-func (s *Styles) Chip(dot color.Color, text string) string {
-	return lipgloss.NewStyle().Foreground(dot).Render("●") + " " + s.Faint.Render(text)
-}
-
-// GradientText colours each rune of a single-line string along the gradient.
-func (s *Styles) GradientText(text string, bold bool) string {
-	runes := []rune(text)
-	if len(runes) == 0 {
-		return ""
-	}
-	cols := lipgloss.Blend1D(max(len(runes), 2), s.Gradient...)
-	var b strings.Builder
-	for i, r := range runes {
-		st := lipgloss.NewStyle().Foreground(cols[i]).Bold(bold)
-		b.WriteString(st.Render(string(r)))
-	}
-	return b.String()
-}
-
-// GradientBlock colours a multi-line block column by column.
-func (s *Styles) GradientBlock(block string) string {
-	lines := strings.Split(block, "\n")
-	w := 0
-	for _, l := range lines {
-		w = max(w, len([]rune(l)))
-	}
-	cols := lipgloss.Blend1D(max(w, 2), s.Gradient...)
-	var b strings.Builder
-	for li, l := range lines {
-		for i, r := range []rune(l) {
-			if r == ' ' {
-				b.WriteRune(r)
-				continue
-			}
-			b.WriteString(lipgloss.NewStyle().Foreground(cols[i]).Bold(true).Render(string(r)))
-		}
-		if li < len(lines)-1 {
-			b.WriteByte('\n')
-		}
-	}
-	return b.String()
+// Dot renders a status indicator: a coloured dot followed by muted text.
+func (s *Styles) Dot(c color.Color, text string) string {
+	return lipgloss.NewStyle().Foreground(c).Render("●") + " " + s.Faint.Render(text)
 }

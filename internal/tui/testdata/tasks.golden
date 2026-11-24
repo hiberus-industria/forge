@@ -1,40 +1,40 @@
- ◆ forge   1 Tareas   2 En vivo   3 Bandeja   4 Informes                                            ● daemon  ·  @aruiz 
- Tareas · mías · activas · 4                                                                               total 2.35 € 
- ▍api  3 · 2.35 €                                                     ╭───────────────────────────────────────────────╮ 
- ❯   #100 Login OIDC con Keycloak (P…  EN CURSO       0.47 €  458.8k  │ api#100   EN CURSO                            │ 
-     #107 Cálculo de coste con caché…  REVISIÓN       1.89 €  559.5k  │ Login OIDC con Keycloak (PKCE + device flow)  │ 
-     #114 Reconciliación periódica c…  PENDIENTE      0.00 €       0  │                                               │ 
-                                                                      │ 0.47 €  ≈ $0.50  · 14 peticiones              │ 
- ▍web  1 · 0.00 €                                                     │ rama feat/100-login-oidc-con-keycloak-pkce-   │ 
-     #135 Corregir gráfico de barras…  PENDIENTE      0.00 €       0  │ device-flow                                   │ 
-                                                                      │ empezada hace 3 d                             │ 
-                                                                      │                                               │ 
-                                                                      │ Tokens                                        │ 
-                                                                      │ entrada     ███                         47.1k │ 
-                                                                      │ salida      █▎                          20.8k │ 
-                                                                      │ caché lect. █████████████████████████  390.8k │ 
-                                                                      │                                               │ 
-                                                                      │ Por modelo                                    │ 
-                                                                      │ sonnet-5-5      ███████████████████    0.43 € │ 
-                                                                      │ haiku-5-5       █▍                     0.03 € │ 
-                                                                      │                                               │ 
-                                                                      │ Por persona                                   │ 
-                                                                      │ @aruiz          ███████████████████    0.26 € │ 
-                                                                      │ @mgil           ██████████████▍        0.20 € │ 
-                                                                      │                                               │ 
-                                                                      │ Por día  2026-10-12 → 2026-10-13              │ 
-                                                                      │ ▆█                                            │ 
-                                                                      ╰───────────────────────────────────────────────╯ 
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
+ forge   Tareas  En vivo  Bandeja 29  Informes                                                        ● al día   @aruiz 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- s empezar • p abrir PR • o/O fijar/quitar tarea activa • enter detalle • / filtrar • a mías/todas • ? ayuda • q salir
+  Mías · Equipo     Abiertas · En curso · Cerradas · Todas                                            4 tareas  2.35 €
+  
+  ▌ ●  api#100  Login OIDC con Keycloak (PKCE + device…     0.47 € │  api#100   ● En curso                             
+    ◐  api#107  Cálculo de coste con caché de 1h            1.89 € │  Login OIDC con Keycloak (PKCE + device flow)     
+    ○  api#114  Reconciliación periódica con GitHub              — │                                                   
+    ○  web#135  Corregir gráfico de barras en modo cla…          — │  0.47 €  ≈ $0.50                                  
+                                                                   │  14 peticiones · 458.8k tokens                    
+                                                                   │                                                   
+                                                                   │  Rama    feat/100-login-oidc-con-keycloak-pkce-de…
+                                                                   │  Inicio  hace 3 d                                 
+                                                                   │  Último  hace 2 d                                 
+                                                                   │  Equipo  @aruiz                                   
+                                                                   │                                                   
+                                                                   │  Tokens                                           
+                                                                   │  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                                                                   │  ■ entrada 10%   ■ salida 5%   ■ caché leída 85%  
+                                                                   │                                                   
+                                                                   │  Por modelo                                       
+                                                                   │  sonnet-5-5      ━━━━━━━━━━━━━━━━━━━━━━     0.43 €
+                                                                   │  haiku-5-5       ━╸━━━━━━━━━━━━━━━━━━━━     0.03 €
+                                                                   │                                                   
+                                                                   │  Por persona                                      
+                                                                   │  @aruiz          ━━━━━━━━━━━━━━━━━━━━━━     0.26 €
+                                                                   │  @mgil           ━━━━━━━━━━━━━━━━━━━━━━     0.20 €
+                                                                   │                                                   
+                                                                   │  Por día                           12 oct → 13 oct
+                                                                   │  ▆█                                               
+                                                                   │                                                   
+                                                                   │                                                   
+                                                                   │                                                   
+                                                                   │                                                   
+                                                                   │                                                   
+                                                                   │                                                   
+                                                                   │                                                   
+                                                                   │                                                   
+                                                                   │                                                   
+
+ enter acciones   s empezar   p abrir PR   / buscar   a mías / equipo                                 ? ayuda   q salir 

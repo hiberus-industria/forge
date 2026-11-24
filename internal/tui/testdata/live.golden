@@ -1,40 +1,40 @@
- ◆ forge   1 Tareas   2 En vivo   3 Bandeja   4 Informes                                            ● daemon  ·  @aruiz 
- ╭────────────────────────────────────╮ ╭────────────────────────────────────╮ ╭──────────────────────────────────────╮ 
- │ imputando a                        │ │ sesión actual                      │ │ entrada     █▊                 50.0k │ 
- │ api#100                            │ │ 0.47 €  ≈ $0.51                    │ │ salida      ▋                  18.1k │ 
- │ ⎇ feat/100-login-oidc-con-keycloa… │ │ 12 peticiones · 509.4k tokens      │ │ caché lect. ████████████████  441.2k │ 
- │ ● por rama                         │ │ hoy 0.47 €                         │ │                                      │ 
- ╰────────────────────────────────────╯ ╰────────────────────────────────────╯ ╰──────────────────────────────────────╯ 
- últimos 30 min  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▁▁▁▁▄▄▄▅▅▅▄▄▄▇▇▇▁▁▁▇▇▇▂▂▂▃▃▃███▁▁▁▆▆▆███▅▅▅▁▁▁ coste/min 
- Actividad                                                                                                 ● en directo 
- hora       modelo              tokens               coste  tarea                                                       
- 11:58:45  ✻ sonnet-5-5        65.8k→523           0.04 €  ✓ api#100                                                    
- 11:57:30  ✻ sonnet-5-5        83.4k→2.1k          0.07 €  ✓ api#100                                                    
- 11:56:15  ✻ sonnet-5-5        20.4k→2.4k          0.04 €  ✓ api#100                                                    
- 11:55:00  ✻ sonnet-5-5        57.7k→2.7k          0.07 €  ✓ api#100                                                    
- 11:53:45  ✻ sonnet-5-5        30.1k→907           0.02 €  ✓ api#100                                                    
- 11:52:30  ✻ haiku-5-5         10.2k→1.0k          0.01 €  ⧗ api#100                                                    
- 11:51:15  ✻ sonnet-5-5        30.3k→2.8k          0.06 €  ✓ api#100                                                    
- 11:50:00  ✻ sonnet-5-5        45.5k→2.7k          0.06 €  ✓ api#100                                                    
- 11:48:45  ✻ sonnet-5-5        24.9k→912           0.03 €  ✓ api#100                                                    
- 11:47:30  ✻ sonnet-5-5        60.4k→542           0.04 €  ✓ api#100                                                    
- 11:46:15  ✻ sonnet-5-5        29.2k→869           0.03 €  ✓ api#100                                                    
- 11:45:00  ✻ haiku-5-5         33.4k→572         0.0082 €  ⧗ api#100                                                    
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
+ forge   Tareas  En vivo  Bandeja 29  Informes                                                        ● al día   @aruiz 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- ↑/k subir • ↓/j bajar • r reconectar • ? ayuda • q salir
+  ● En directo  ·  Claude Code                                                                             Hoy  0.47 €
+  
+  Imputando a  api#100  Login OIDC con Keycloak (PKCE + device flow)
+               rama feat/100-login-oidc-con-keycloak-pkce-device-flow · según la rama
+  Esta sesión  0.47 €  ≈ $0.51   12 peticiones · 509.4k tokens
+  
+  Coste por minuto                                                                                          máx 0.07 €
+  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▁▁▁▁▄▄▄▄▅▅▅▅▄▄▄▄▇▇▇▇▁▁▁▁▇▇▇▇▂▂▂▃▃▃▃████▁▁▁▁▆▆▆▆████▅▅▅▅▁▁▁
+  hace 30 min                                                                                                    ahora
+  
+    hora      modelo           entrada   salida      coste     tarea                                                  
+  ▌ 11:58:45  sonnet-5-5         65.8k      523     0.04 €     api#100                                                
+    11:57:30  sonnet-5-5         83.4k     2.1k     0.07 €     api#100                                                
+    11:56:15  sonnet-5-5         20.4k     2.4k     0.04 €     api#100                                                
+    11:55:00  sonnet-5-5         57.7k     2.7k     0.07 €     api#100                                                
+    11:53:45  sonnet-5-5         30.1k      907     0.02 €     api#100                                                
+    11:52:30  haiku-5-5          10.2k     1.0k     0.01 €  ⧗  api#100                                                
+    11:51:15  sonnet-5-5         30.3k     2.8k     0.06 €     api#100                                                
+    11:50:00  sonnet-5-5         45.5k     2.7k     0.06 €     api#100                                                
+    11:48:45  sonnet-5-5         24.9k      912     0.03 €     api#100                                                
+    11:47:30  sonnet-5-5         60.4k      542     0.04 €     api#100                                                
+    11:46:15  sonnet-5-5         29.2k      869     0.03 €     api#100                                                
+    11:45:00  haiku-5-5          33.4k      572   0.0082 €  ⧗  api#100                                                
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+ ↑↓ moverse                                                                                           ? ayuda   q salir 

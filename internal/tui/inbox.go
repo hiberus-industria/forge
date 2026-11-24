@@ -6,32 +6,24 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/hiberus-industria/forge/internal/api"
 	"github.com/hiberus-industria/forge/internal/domain"
+	"github.com/hiberus-industria/forge/internal/tui/theme"
 )
 
-type inboxKeys struct{ Up, Down, Toggle, All, Assign, Mine, Refresh key.Binding }
-
-func (k inboxKeys) ShortHelp() []key.Binding {
-	return []key.Binding{k.Toggle, k.All, k.Assign, k.Mine, k.Refresh}
-}
-
-func (k inboxKeys) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Toggle, k.All}, {k.Assign, k.Mine, k.Refresh}}
-}
-
-var inboxKeyMap = inboxKeys{
-	Up:      key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "subir")),
-	Down:    key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "bajar")),
+var inboxKeys = struct {
+	Toggle, All, Assign, Clear, Filter, Mine, Refresh key.Binding
+}{
 	Toggle:  key.NewBinding(key.WithKeys("space", "x"), key.WithHelp("espacio", "marcar")),
-	All:     key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "marcar todo")),
-	Assign:  key.NewBinding(key.WithKeys("enter", "m"), key.WithHelp("enter", "asignar a tarea")),
-	Mine:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "mías/equipo")),
+	All:     key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "marcar todas")),
+	Assign:  key.NewBinding(key.WithKeys("enter", "m"), key.WithHelp("enter", "asignar a una tarea")),
+	Clear:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "desmarcar")),
+	Filter:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "buscar")),
+	Mine:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "mía / equipo")),
 	Refresh: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "recargar")),
 }
 
@@ -51,24 +43,95 @@ type reassignDoneMsg struct {
 	to  domain.IssueRef
 }
 
+func groupWhere(g api.InboxGroup, org string) string {
+	if g.Bucket == api.BucketRepo && g.Repo != nil {
+		return shortRepo(*g.Repo, org)
+	}
+	return "sin repositorio"
+}
+
+func groupModels(g api.InboxGroup) string {
+	if g.Models == nil {
+		return ""
+	}
+	ms := make([]string, len(*g.Models))
+	for i, x := range *g.Models {
+		ms[i] = shortModel(x)
+	}
+	return strings.Join(ms, ", ")
+}
+
+func groupWho(g api.InboxGroup) string {
+	if g.User.GithubLogin != nil {
+		return "@" + *g.User.GithubLogin
+	}
+	return g.User.Name
+}
+
 type inboxScreen struct {
 	sh       *shared
 	groups   []api.InboxGroup
 	loading  bool
 	err      error
 	seq      int
-	cursor   int
 	selected map[string]bool
 	all      bool
+
+	list          rowList[api.InboxGroup]
+	width, height int
 }
 
 func newInboxScreen(sh *shared) *inboxScreen {
-	return &inboxScreen{sh: sh, selected: map[string]bool{}, loading: true}
+	m := &inboxScreen{sh: sh, selected: map[string]bool{}, loading: true}
+	m.list = newRowList(sh.st, func(g api.InboxGroup) string {
+		b := ""
+		if g.Branch != nil {
+			b = *g.Branch
+		}
+		return strings.Join([]string{groupWhere(g, sh.org), b, harnessName(string(g.Harness)), groupModels(g), groupWho(g)}, " ")
+	})
+	return m
 }
 
-func (m *inboxScreen) Keys() help.KeyMap { return inboxKeyMap }
-func (m *inboxScreen) Capturing() bool   { return false }
-func (m *inboxScreen) Init() tea.Cmd     { return m.load() }
+func (m *inboxScreen) restyle(s *theme.Styles) { m.list.restyle(s) }
+
+// Badge is the number of sessions waiting in the inbox.
+func (m *inboxScreen) Badge() int { return len(m.groups) }
+
+func (m *inboxScreen) Hints() []key.Binding {
+	switch {
+	case m.list.Filtering():
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "aplicar")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "quitar")),
+		}
+	case len(m.selected) > 0:
+		return []key.Binding{inboxKeys.Assign, inboxKeys.Toggle, inboxKeys.Clear}
+	}
+	return []key.Binding{inboxKeys.Assign, inboxKeys.Toggle, inboxKeys.Filter, inboxKeys.Mine}
+}
+
+func (m *inboxScreen) Help() []helpGroup {
+	return []helpGroup{
+		{"Moverse", []key.Binding{navKeys.Up, navKeys.Down, navKeys.PgUp, navKeys.PgDown}},
+		{"Asignar", []key.Binding{inboxKeys.Toggle, inboxKeys.All, inboxKeys.Clear, inboxKeys.Assign}},
+		{"Lista", []key.Binding{inboxKeys.Filter, inboxKeys.Mine, inboxKeys.Refresh}},
+	}
+}
+
+func (m *inboxScreen) Capturing() bool { return m.list.Filtering() }
+func (m *inboxScreen) Init() tea.Cmd   { return m.load() }
+
+// Body rows: toolbar, explanation, gap, column titles, list, selection bar.
+const (
+	inboxTop    = 4
+	inboxBottom = 1
+)
+
+func (m *inboxScreen) SetSize(w, h int) {
+	m.width, m.height = w, h
+	m.list.SetHeight(h - inboxTop - inboxBottom)
+}
 
 // groupKey identifies an inbox group across reloads.
 func groupKey(g api.InboxGroup) string {
@@ -99,7 +162,7 @@ func (m *inboxScreen) load() tea.Cmd {
 	}
 }
 
-// selection returns the selected groups, or the one under the cursor when
+// selection returns the marked groups, or the one under the cursor when
 // nothing is marked.
 func (m *inboxScreen) selection() []api.InboxGroup {
 	var out []api.InboxGroup
@@ -108,10 +171,20 @@ func (m *inboxScreen) selection() []api.InboxGroup {
 			out = append(out, g)
 		}
 	}
-	if len(out) == 0 && m.cursor < len(m.groups) {
-		out = append(out, m.groups[m.cursor])
+	if g, ok := m.list.Selected(); ok && len(out) == 0 {
+		out = append(out, g)
 	}
 	return out
+}
+
+func (m *inboxScreen) selectedCost() int64 {
+	var c int64
+	for _, g := range m.groups {
+		if m.selected[groupKey(g)] {
+			c += g.CostUsdMicros
+		}
+	}
+	return c
 }
 
 // buildReassign builds the API request moving every event of the groups to
@@ -139,6 +212,15 @@ func buildReassign(groups []api.InboxGroup, to *domain.IssueRef, reason string) 
 	return req, cost
 }
 
+func (m *inboxScreen) toggle(g api.InboxGroup) {
+	k := groupKey(g)
+	if m.selected[k] {
+		delete(m.selected, k)
+	} else {
+		m.selected[k] = true
+	}
+}
+
 func (m *inboxScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case inboxLoadedMsg:
@@ -146,68 +228,80 @@ func (m *inboxScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
 			return m, nil
 		}
 		m.loading, m.err = false, msg.err
-		if msg.err == nil {
-			m.groups = msg.groups
-			keep := map[string]bool{}
-			for _, g := range m.groups {
-				if k := groupKey(g); m.selected[k] {
-					keep[k] = true
-				}
-			}
-			m.selected = keep
-			m.cursor = min(m.cursor, max(0, len(m.groups)-1))
+		if msg.err != nil {
+			return m, nil
 		}
+		m.groups = msg.groups
+		keep := map[string]bool{}
+		for _, g := range m.groups {
+			if k := groupKey(g); m.selected[k] {
+				keep[k] = true
+			}
+		}
+		m.selected = keep
+		m.list.SetItems(m.groups, groupKey)
+		return m, nil
 	case refreshMsg:
 		return m, m.load()
 	case pickTasksMsg:
 		return m, m.openPicker(msg)
 	case reassignDoneMsg:
 		m.selected = map[string]bool{}
-		text := fmt.Sprintf("%d eventos asignados a %s", msg.res.Updated, msg.to)
+		text := fmt.Sprintf("%s a %s", plural(msg.res.Updated, "petición asignada", "peticiones asignadas"), msg.to)
 		kind := toastOK
 		if msg.res.Skipped > 0 {
-			text += fmt.Sprintf(" · %d omitidos (no son tuyos)", msg.res.Skipped)
+			text += fmt.Sprintf(" · %d no eran tuyas y no se han movido", msg.res.Skipped)
 			kind = toastWarn
 		}
 		return m, tea.Batch(toast(kind, text), refresh)
 	case tea.MouseWheelMsg:
-		switch msg.Button {
-		case tea.MouseWheelUp:
-			m.cursor = max(0, m.cursor-1)
-		case tea.MouseWheelDown:
-			m.cursor = min(max(0, len(m.groups)-1), m.cursor+1)
-		}
-	case tea.KeyPressMsg:
-		switch {
-		case key.Matches(msg, inboxKeyMap.Up):
-			m.cursor = max(0, m.cursor-1)
-		case key.Matches(msg, inboxKeyMap.Down):
-			m.cursor = min(max(0, len(m.groups)-1), m.cursor+1)
-		case key.Matches(msg, inboxKeyMap.Toggle):
-			if m.cursor < len(m.groups) {
-				k := groupKey(m.groups[m.cursor])
-				m.selected[k] = !m.selected[k]
-				if !m.selected[k] {
-					delete(m.selected, k)
-				}
-				m.cursor = min(len(m.groups)-1, m.cursor+1)
+		m.list.Wheel(msg)
+		return m, nil
+	case tea.MouseClickMsg:
+		// A click selects the row; on the mark it also toggles it.
+		if m.list.Click(msg.Y-inboxTop) && msg.X < 4 {
+			if g, ok := m.list.Selected(); ok {
+				m.toggle(g)
 			}
-		case key.Matches(msg, inboxKeyMap.All):
-			if len(m.selected) == len(m.groups) {
+		}
+		return m, nil
+	case tea.KeyPressMsg:
+		if m.list.Filtering() {
+			return m, m.list.FilterKey(msg)
+		}
+		switch {
+		case key.Matches(msg, inboxKeys.Toggle):
+			if g, ok := m.list.Selected(); ok {
+				m.toggle(g)
+				m.list.Move(1)
+			}
+			return m, nil
+		case key.Matches(msg, inboxKeys.All):
+			if len(m.selected) == m.list.Len() {
 				m.selected = map[string]bool{}
 			} else {
-				for _, g := range m.groups {
+				for _, g := range m.list.Visible() {
 					m.selected[groupKey(g)] = true
 				}
 			}
-		case key.Matches(msg, inboxKeyMap.Mine):
+			return m, nil
+		case key.Matches(msg, inboxKeys.Clear):
+			if len(m.selected) > 0 {
+				m.selected = map[string]bool{}
+			} else {
+				m.list.ClearFilter()
+			}
+			return m, nil
+		case key.Matches(msg, inboxKeys.Filter):
+			return m, m.list.StartFilter()
+		case key.Matches(msg, inboxKeys.Mine):
 			m.all = !m.all
 			m.selected = map[string]bool{}
-			m.cursor = 0
+			m.list.Top()
 			return m, m.load()
-		case key.Matches(msg, inboxKeyMap.Refresh):
+		case key.Matches(msg, inboxKeys.Refresh):
 			return m, m.load()
-		case key.Matches(msg, inboxKeyMap.Assign):
+		case key.Matches(msg, inboxKeys.Assign):
 			if len(m.groups) == 0 {
 				return m, nil
 			}
@@ -218,6 +312,13 @@ func (m *inboxScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
 				return pickTasksMsg{tasks: ts, err: err}
 			}
 		}
+		m.list.Nav(msg)
+		return m, nil
+	}
+	if m.list.Filtering() {
+		var cmd tea.Cmd
+		m.list.input, cmd = m.list.input.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -228,13 +329,13 @@ func (m *inboxScreen) openPicker(msg pickTasksMsg) tea.Cmd {
 		return nil
 	}
 	sh := m.sh
-	var items []pickItem
-	// Suggest tasks of the same repository first.
+	// Tasks of the same repository first: they are the likely target.
 	repoHint := ""
 	if groups[0].Repo != nil {
 		repoHint = *groups[0].Repo
 	}
-	for pass := 0; pass < 2; pass++ {
+	var items []pickItem
+	for pass := range 2 {
 		for _, t := range msg.tasks {
 			same := t.Ref.Repo == repoHint
 			if (pass == 0) != same {
@@ -244,104 +345,159 @@ func (m *inboxScreen) openPicker(msg pickTasksMsg) tea.Cmd {
 			if err != nil {
 				continue
 			}
-			items = append(items, pickItem{ref: ref, title: t.Title})
+			items = append(items, pickItem{ref: ref, title: t.Title, suggested: same})
 		}
 	}
 	req, cost := buildReassign(groups, nil, "")
-	sub := fmt.Sprintf("%d grupos · %d eventos · %s", len(groups), len(req.EventIds), sh.money(cost))
+	sub := fmt.Sprintf("%s · %s · %s", plural(len(groups), "sesión", "sesiones"), plural(len(req.EventIds), "petición", "peticiones"), sh.money(cost))
 	if msg.err != nil {
-		sub += "\n" + lipgloss.NewStyle().Foreground(sh.st.Warning).Render("no se pudieron cargar tareas: escribe repo#número")
+		sub += ". No se pudieron cargar las tareas: escribe repo#número."
 	}
-	return openModal(newPickerModal(sh.st, "Asignar a tarea", sub, sh.org, items, func(ref domain.IssueRef) tea.Cmd {
-		req, cost := buildReassign(groups, &ref, "triaje desde la bandeja")
-		return openModal(&confirmModal{
-			title: "Confirmar reasignación",
-			body:  fmt.Sprintf("Mover %d eventos (%s) a %s.\nQuedará registrado en la auditoría.", len(req.EventIds), sh.money(cost), ref),
-			onYes: func() tea.Msg {
-				res, err := sh.be.Reassign(sh.ctx, req)
-				if err != nil {
-					return errMsg{err}
-				}
-				return reassignDoneMsg{res: res, to: ref}
-			},
-		})
+	return openModal(newPickerModal(sh.st, "¿A qué tarea va este gasto?", sub, sh.org, items, func(ref domain.IssueRef) tea.Cmd {
+		req, _ := buildReassign(groups, &ref, "triaje desde la bandeja")
+		return func() tea.Msg {
+			res, err := sh.be.Reassign(sh.ctx, req)
+			if err != nil {
+				return errMsg{err}
+			}
+			return reassignDoneMsg{res: res, to: ref}
+		}
 	}))
 }
 
-func (m *inboxScreen) View(width, height int) string {
-	s := m.sh.st
-	scope := "mía"
+// inboxCols decides which columns fit: the less important ones go first.
+type inboxCols struct {
+	where, branch, harness, models, who int
+}
+
+func (m *inboxScreen) columns(width int) inboxCols {
+	c := inboxCols{where: 15, branch: 22, harness: 11, models: 18}
 	if m.all {
-		scope = "de todo el equipo"
+		c.who = 10
+	}
+	// check, events, last, cost and gaps are always there.
+	fixed := 2 + 1 + 5 + 9 + 9 + colGap*4
+	sum := func() int {
+		n := fixed + c.where + c.branch
+		for _, w := range []int{c.harness, c.models, c.who} {
+			if w > 0 {
+				n += w + colGap
+			}
+		}
+		return n + colGap
+	}
+	for _, drop := range []*int{&c.models, &c.harness, &c.who} {
+		if sum() <= width {
+			break
+		}
+		*drop = 0
+	}
+	c.branch = max(8, c.branch+width-sum())
+	return c
+}
+
+func (m *inboxScreen) View() string {
+	s := m.sh.st
+	width, height := m.width, m.height
+	scope := 0
+	if m.all {
+		scope = 1
 	}
 	var total int64
 	for _, g := range m.groups {
 		total += g.CostUsdMicros
 	}
-	title := s.Title.Render("Bandeja") + s.Faint.Render(fmt.Sprintf(" · %s · %d sesiones sin asignar", scope, len(m.groups)))
-	right := ""
-	if n := len(m.selected); n > 0 {
-		right = lipgloss.NewStyle().Foreground(s.Primary).Bold(true).Render(fmt.Sprintf("%d marcadas  ", n))
+	toolbar := spread(segmented(s, []string{"Mía", "Equipo"}, scope),
+		s.Faint.Render(plural(len(m.groups), "sesión", "sesiones")+" sin asignar  ")+s.Bold.Render(m.sh.money(total)), width)
+	if m.list.Filtering() || m.list.Query() != "" {
+		toolbar = m.list.FilterView(s, width)
 	}
-	right += s.Faint.Render("pendiente ") + lipgloss.NewStyle().Foreground(s.Warning).Bold(true).Render(m.sh.money(total))
-	head := spread(title, right, width)
-	bodyH := height - 2
+	intro := s.Faint.Render(trunc("Gasto que no se pudo asociar a una tarea: sesiones fuera de la rama de un issue.", width))
+	bodyH := max(1, height-inboxTop)
 
 	switch {
 	case m.loading && len(m.groups) == 0:
-		return head + "\n" + center(s.Faint.Render("Cargando bandeja…"), width, bodyH)
+		return toolbar + "\n" + intro + "\n\n" + center(s.Faint.Render("Cargando bandeja…"), width, bodyH)
 	case m.err != nil && len(m.groups) == 0:
-		return head + "\n" + center(lipgloss.NewStyle().Foreground(s.Danger).Render("✗ "+m.err.Error()), width, bodyH)
+		return toolbar + "\n" + intro + "\n\n" + emptyState(s, width, bodyH, s.Err.Render("No se pudo cargar la bandeja"), m.err.Error(), "Pulsa r para reintentar.")
 	case len(m.groups) == 0:
-		msg := s.GradientText("Bandeja vacía", true) + "\n\n" + s.Faint.Render("Todo tu gasto está imputado a una tarea. ✨")
-		return head + "\n" + center(msg, width, bodyH)
+		return toolbar + "\n\n\n" + emptyState(s, width, bodyH, s.OK.Render("✓ ")+s.Bold.Render("Bandeja vacía"), "Todo tu gasto está asignado a una tarea.")
 	}
 
-	// Each group takes two lines.
-	rows := max(1, bodyH/2)
-	start, end := window(len(m.groups), m.cursor, rows)
-	var b strings.Builder
-	for i := start; i < end; i++ {
-		b.WriteString(m.groupView(m.groups[i], i == m.cursor, width))
-		if i < end-1 {
-			b.WriteByte('\n')
+	c := m.columns(width)
+	cols := func(g *api.InboxGroup, sel bool) []col {
+		var out []col
+		add := func(w int, cl col) {
+			if w > 0 {
+				cl.w = w
+				out = append(out, cl)
+			}
 		}
+		if g == nil {
+			add(1, col{text: " "})
+			add(c.where, col{text: "repositorio"})
+			add(c.branch, col{text: "rama"})
+			add(c.harness, col{text: "herramienta"})
+			add(c.models, col{text: "modelos"})
+			add(5, col{text: "pet.", right: true})
+			add(9, col{text: "última"})
+			add(c.who, col{text: "persona"})
+			add(9, col{text: "coste", right: true})
+			return out
+		}
+		check, cs := "○", s.Dim
+		if m.selected[groupKey(*g)] {
+			check, cs = "●", s.Hi
+		}
+		whereSt := s.Base
+		if g.Bucket != api.BucketRepo {
+			whereSt = s.Faint.Italic(true)
+		}
+		if sel {
+			whereSt = whereSt.Bold(true)
+		}
+		branch := "—"
+		if g.Branch != nil && *g.Branch != "" {
+			branch = *g.Branch
+		}
+		add(1, col{text: check, st: cs})
+		add(c.where, col{text: groupWhere(*g, m.sh.org), st: whereSt})
+		add(c.branch, col{text: branch, st: s.Faint})
+		add(c.harness, col{text: harnessName(string(g.Harness)), st: s.Faint})
+		add(c.models, col{text: groupModels(*g), st: s.Faint})
+		add(5, col{text: fmt.Sprint(g.Events), right: true, st: s.Faint})
+		add(9, col{text: ago(g.LastAt, m.sh.now()), st: s.Faint})
+		add(c.who, col{text: groupWho(*g), st: s.Faint})
+		add(9, col{text: m.sh.money(g.CostUsdMicros), right: true, st: s.Base})
+		return out
 	}
-	return head + "\n" + fitHeight(b.String(), bodyH)
+
+	header := headerRow(s, width, cols(nil, false)...)
+	list := m.list.View(width, func(g api.InboxGroup, sel bool, w int) string {
+		return row(s, w, sel, cols(&g, sel)...)
+	})
+	if m.list.Len() == 0 {
+		list = emptyState(s, width, max(1, height-inboxTop-inboxBottom), "Nada coincide con la búsqueda", "Pulsa esc para quitar el filtro.")
+	}
+	return toolbar + "\n" + intro + "\n\n" + header + "\n" + list + "\n" + m.selectionBar(width)
 }
 
-func (m *inboxScreen) groupView(g api.InboxGroup, cur bool, width int) string {
+// selectionBar summarises what is marked and what enter will do.
+func (m *inboxScreen) selectionBar(width int) string {
 	s := m.sh.st
-	check := s.Dim.Render("○")
-	if m.selected[groupKey(g)] {
-		check = lipgloss.NewStyle().Foreground(s.Primary).Bold(true).Render("●")
+	n := len(m.selected)
+	if n == 0 {
+		return ""
 	}
-	where := lipgloss.NewStyle().Foreground(s.Warning).Render("personal / otros")
-	if g.Bucket == api.BucketRepo && g.Repo != nil {
-		where = lipgloss.NewStyle().Foreground(s.Secondary).Bold(true).Render(shortRepo(*g.Repo, m.sh.org))
-		if g.Branch != nil && *g.Branch != "" {
-			where += s.Faint.Render(" ⎇ " + *g.Branch)
-		}
-	}
-	cost := lipgloss.NewStyle().Bold(true).Render(m.sh.money(g.CostUsdMicros))
-	l1 := spread(check+" "+harnessIcon(s, string(g.Harness))+" "+where, cost, width-2)
-	models := ""
-	if g.Models != nil {
-		ms := make([]string, len(*g.Models))
-		for i, x := range *g.Models {
-			ms[i] = shortModel(x)
-		}
-		models = strings.Join(ms, ", ")
-	}
-	who := g.User.Name
-	if g.User.GithubLogin != nil {
-		who = "@" + *g.User.GithubLogin
-	}
-	l2 := s.Faint.Render(fmt.Sprintf("    %s · %d peticiones · %s · %s · %s", harnessName(string(g.Harness)), g.Events, models, ago(g.LastAt, m.sh.now()), who))
-	l2 = trunc(l2, width-2)
-	if cur {
-		mark := lipgloss.NewStyle().Foreground(s.Primary).Bold(true).Render("❯ ")
-		return mark + s.Selected.Width(width-2).Render(l1) + "\n  " + s.Selected.Width(width-2).Render(l2)
-	}
-	return "  " + l1 + "\n  " + l2
+	left := s.Hi.Background(s.Surface).Render(" "+plural(n, "sesión marcada", "sesiones marcadas")) +
+		s.Base.Background(s.Surface).Render("  "+m.sh.money(m.selectedCost()))
+	right := s.Key.Background(s.Surface).Render("enter") + s.Faint.Background(s.Surface).Render(" asignar a una tarea   ") +
+		s.Key.Background(s.Surface).Render("esc") + s.Faint.Background(s.Surface).Render(" desmarcar ")
+	return spreadBg(s, left, right, width)
+}
+
+// spreadBg is spread() with the gap painted in the surface colour.
+func spreadBg(s *theme.Styles, left, right string, w int) string {
+	gap := max(1, w-lipgloss.Width(left)-lipgloss.Width(right))
+	return left + s.Sel.Render(strings.Repeat(" ", gap)) + right
 }

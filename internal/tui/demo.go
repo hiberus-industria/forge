@@ -568,6 +568,9 @@ func (b *demoBackend) Report(_ context.Context, p api.GetCostReportParams) (api.
 		if p.From != nil && e.at.Before(*p.From) || p.To != nil && !e.at.Before(*p.To) {
 			continue
 		}
+		if p.Repo != nil && e.repo != *p.Repo {
+			continue
+		}
 		evs = append(evs, e)
 	}
 	rate := 0.0
