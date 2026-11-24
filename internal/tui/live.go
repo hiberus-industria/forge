@@ -347,8 +347,10 @@ func (m *liveScreen) View() string {
 	chart := sparkline(stretch(vals, width), s.Primary, s.Border)
 	axis := spread(s.Dim.Render(fmt.Sprintf("hace %d min", sparkMinutes)), s.Dim.Render("ahora"), width)
 
-	return strings.Join([]string{toolbar, "", who, session, "", chartTitle, chart, axis, "",
-		headerRow(s, width, m.feedCols(nil, false, width)...), m.feedView(width)}, "\n")
+	return strings.Join([]string{
+		toolbar, "", who, session, "", chartTitle, chart, axis, "",
+		headerRow(s, width, m.feedCols(nil, false, width)...), m.feedView(width),
+	}, "\n")
 }
 
 func (m *liveScreen) feedCols(e *localapi.LiveEvent, sel bool, width int) []col {
@@ -357,8 +359,15 @@ func (m *liveScreen) feedCols(e *localapi.LiveEvent, sel bool, width int) []col 
 		modelW = 10
 	}
 	if e == nil {
-		return []col{{text: "hora", w: 8}, {text: "modelo", w: modelW}, {text: "entrada", w: 8, right: true},
-			{text: "salida", w: 7, right: true}, {text: "coste", w: 9, right: true}, {text: "", w: 1}, {text: "tarea"}}
+		return []col{
+			{text: "hora", w: 8},
+			{text: "modelo", w: modelW},
+			{text: "entrada", w: 8, right: true},
+			{text: "salida", w: 7, right: true},
+			{text: "coste", w: 9, right: true},
+			{text: "", w: 1},
+			{text: "tarea"},
+		}
 	}
 	s := m.sh.st
 	var where string

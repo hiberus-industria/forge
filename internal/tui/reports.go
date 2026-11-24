@@ -110,8 +110,10 @@ type reportsScreen struct {
 }
 
 func newReportsScreen(sh *shared) *reportsScreen {
-	return &reportsScreen{sh: sh, currency: sh.currency, loading: true,
-		list: newRowList(sh.st, func(r api.CostRow) string { return r.Label })}
+	return &reportsScreen{
+		sh: sh, currency: sh.currency, loading: true,
+		list: newRowList(sh.st, func(r api.CostRow) string { return r.Label }),
+	}
 }
 
 func (m *reportsScreen) canDrill() bool {
@@ -405,8 +407,13 @@ func (m *reportsScreen) View() string {
 	}
 	cols := func(cr *api.CostRow, sel bool, w int) []col {
 		if cr == nil {
-			return []col{{text: groupBys[m.group].label, w: lw}, {text: ""}, {text: "coste", w: 10, right: true},
-				{text: "%", w: 4, right: true}, {text: "pet.", w: 6, right: true}}
+			return []col{
+				{text: groupBys[m.group].label, w: lw},
+				{text: ""},
+				{text: "coste", w: 10, right: true},
+				{text: "%", w: 4, right: true},
+				{text: "pet.", w: 6, right: true},
+			}
 		}
 		share := 0.0
 		if r.Total > 0 {
